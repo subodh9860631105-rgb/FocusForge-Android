@@ -18,18 +18,15 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Organize Files & Generate Android Configs
+      - name: Organize Files & Generate Android Build
         run: |
           mkdir -p app/src/main/java/com/focusforge/pro
+          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/drawable
 
-          f1=$(find . -name "AndroidManifest.xml" | head -n 1)
-          if [ -n "$f1" ] && [ "$f1" != "./app/src/main/AndroidManifest.xml" ]; then cp "$f1" app/src/main/AndroidManifest.xml; fi
-
-          f2=$(find . -name "FocusAccessibilityService.kt" | head -n 1)
-          if [ -n "$f2" ] && [ "$f2" != "./app/src/main/java/com/focusforge/pro/FocusAccessibilityService.kt" ]; then cp "$f2" app/src/main/java/com/focusforge/pro/FocusAccessibilityService.kt; fi
-
-          f3=$(find . -name "MainActivity.kt" | head -n 1)
-          if [ -n "$f3" ] && [ "$f3" != "./app/src/main/java/com/focusforge/pro/MainActivity.kt" ]; then cp "$f3" app/src/main/java/com/focusforge/pro/MainActivity.kt; fi
+          [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/src/main/
+          [ -f "FocusAccessibilityService.kt" ] && mv FocusAccessibilityService.kt app/src/main/java/com/focusforge/pro/
+          [ -f "MainActivity.kt" ] && mv MainActivity.kt app/src/main/java/com/focusforge/pro/
 
           cat << 'EOF' > settings.gradle
           pluginManagement {
@@ -83,7 +80,6 @@ jobs:
           dependencies {}
           EOF
 
-          mkdir -p app/src/main/res/xml
           cat << 'EOF' > app/src/main/res/xml/accessibility_service_config.xml
           <?xml version="1.0" encoding="utf-8"?>
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
@@ -102,7 +98,6 @@ jobs:
           </device-admin>
           EOF
 
-          mkdir -p app/src/main/res/drawable
           cat << 'EOF' > app/src/main/res/drawable/ic_app_logo.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
@@ -114,15 +109,12 @@ jobs:
           </vector>
           EOF
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
+          # Auto-accept Android SDK licenses & build
+          yes | sdkmanager --licenses || true
+          gradle wrapper --gradle-version 8.7
+          ./gradlew assembleDebug --no-daemon
 
-      - name: Compile Debug APK
-        run: gradle assembleDebug --no-daemon
-
-      - name: Upload Ready APK
+      - name: Upload Finished APK
         uses: actions/upload-artifact@v4
         with:
           name: FocusForge-Pro-Installable-APK
