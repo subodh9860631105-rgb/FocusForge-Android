@@ -17,45 +17,41 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
 
-    private lateinit var webView: WebView
+    private var webView: WebView? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.parseColor("#0F172A")
 
-        webView = WebView(this)
-        setContentView(webView)
-
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            mediaPlaybackRequiresUserGesture = false
+        try {
+            webView = WebView(this).apply {
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    databaseEnabled = true
+                    mediaPlaybackRequiresUserGesture = false
+                }
+                webChromeClient = WebChromeClient()
+                webViewClient = WebViewClient()
+                addJavascriptInterface(AndroidBridge(context), "AndroidBridge")
+                loadDataWithBaseURL("https://focusforge.local/", DASHBOARD_HTML, "text/html", "UTF-8", null)
+            }
+            setContentView(webView)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error starting UI: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            finish()
         }
-        webView.webChromeClient = WebChromeClient()
-        webView.webViewClient = WebViewClient()
-        webView.addJavascriptInterface(AndroidBridge(this), "AndroidBridge")
-
-        webView.loadDataWithBaseURL(
-            "https://focusforge.local/",
-            DASHBOARD_HTML,
-            "text/html",
-            "UTF-8",
-            null
-        )
     }
 
     override fun onResume() {
         super.onResume()
-        if (::webView.isInitialized) {
-            webView.evaluateJavascript("if(window.refreshNativeStatus) window.refreshNativeStatus();", null)
-        }
+        webView?.evaluateJavascript("if(window.refreshNativeStatus) window.refreshNativeStatus();", null)
     }
 
     override fun onBackPressed() {
-        if (::webView.isInitialized && webView.canGoBack()) {
-            webView.goBack()
+        if (webView?.canGoBack() == true) {
+            webView?.goBack()
         } else {
             super.onBackPressed()
         }
@@ -76,20 +72,30 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun openAccessibilitySettings() {
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            context.startActivity(intent)
-            Toast.makeText(context, "Find 'FocusForge Pro Blocker' and turn it ON", Toast.LENGTH_LONG).show()
+            try {
+                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+                Toast.makeText(context, "Find 'FocusForge Pro Blocker' and turn it ON", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Please open Settings -> Accessibility manually", Toast.LENGTH_LONG).show()
+            }
         }
 
         @JavascriptInterface
         fun openDeviceAdminSettings() {
-            val comp = ComponentName(context, StrictDeviceAdminReceiver::class.java)
-            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, comp)
-                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Prevents uninstalling FocusForge during Strict Study Sessions.")
+            try {
+                val comp = ComponentName(context, StrictDeviceAdminReceiver::class.java)
+                val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                    putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, comp)
+                    putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Prevents uninstalling FocusForge during Strict Study Sessions.")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error opening Device Admin settings", Toast.LENGTH_SHORT).show()
             }
-            startActivity(intent)
         }
 
         @JavascriptInterface
@@ -125,8 +131,6 @@ class MainActivity : Activity() {
   .rings-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .ring-box { text-align: center; padding: 12px; background: #F8FAFC; border-radius: 14px; }
   .big-pct { font-size: 26px; font-weight: 900; color: var(--indigo); margin: 4px 0; }
-  .week-rings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
-  .w-pill { background: #F8FAFC; border-radius: 12px; padding: 8px 4px; text-align: center; font-size: 11px; font-weight: 700; }
   .bars-wrap { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 12px; padding-top: 10px; border-bottom: 1px solid #E2E8F0; }
   .bar-col { flex: 1; background: #E0E7FF; border-radius: 4px 4px 0 0; position: relative; transition: height 0.3s; }
   .bar-col.active { background: var(--indigo); }
@@ -161,7 +165,6 @@ class MainActivity : Activity() {
   </div>
 
   <div class="container">
-    <!-- TAB 1: STREAKO DASHBOARD -->
     <div id="tab-dash" class="tab-pane active">
       <div class="card" style="background:linear-gradient(135deg,#EEF2FF,#FCE7F3);">
         <div style="font-size:18px;font-weight:900;color:#065F46;">trust the process</div>
@@ -196,7 +199,6 @@ class MainActivity : Activity() {
       </div>
     </div>
 
-    <!-- TAB 2: REGAIN PRO BLOCKER -->
     <div id="tab-focus" class="tab-pane">
       <div class="card">
         <div class="card-title">Regain Pro Focus Timer & Strict Lock</div>
@@ -229,7 +231,6 @@ class MainActivity : Activity() {
       </div>
     </div>
 
-    <!-- TAB 3: STUDY HUB -->
     <div id="tab-study" class="tab-pane">
       <div class="card">
         <div class="card-title">Subject Revision & Spaced Repetition</div>
@@ -241,7 +242,6 @@ class MainActivity : Activity() {
       </div>
     </div>
 
-    <!-- TAB 4: GYM & HYDRATION -->
     <div id="tab-gym" class="tab-pane">
       <div class="card">
         <div class="card-title">Daily 8-Glass Hydration Tracker</div>
@@ -293,6 +293,7 @@ class MainActivity : Activity() {
 
   function render() {
     const hList = document.getElementById('habitList');
+    if(!hList) return;
     hList.innerHTML = '';
     let totalChecks = 0, todayChecks = 0;
     const dayTotals = [0,0,0,0,0,0,0];
@@ -393,26 +394,25 @@ class MainActivity : Activity() {
   let timerSecs = 45 * 60, timerRunning = false, timerInt = null;
   function setMins(m) { if (timerRunning) return; timerSecs = m * 60; updateTimerUI(); }
   function updateTimerUI() {
-    const m = String(Math.floor(timerSecs / 60)).padStart(2, '0');
-    const s = String(timerSecs % 60).padStart(2, '0');
-    document.getElementById('timerDisplay').innerText = `${m}:${s}`;
+    const el = document.getElementById('timerDisplay');
+    if(el) el.innerText = `${String(Math.floor(timerSecs / 60)).padStart(2, '0')}:${String(timerSecs % 60).padStart(2, '0')}`;
   }
   function toggleTimer() {
     timerRunning = !timerRunning;
     const btn = document.getElementById('startTimerBtn');
     if (timerRunning) {
-      btn.innerText = 'End Focus Session'; btn.className = 'btn danger';
+      if(btn) { btn.innerText = 'End Focus Session'; btn.className = 'btn danger'; }
       timerInt = setInterval(() => { if (timerSecs > 0) { timerSecs--; updateTimerUI(); } else { toggleTimer(); } }, 1000);
     } else {
-      btn.innerText = 'Start Strict Study Session'; btn.className = 'btn mint';
+      if(btn) { btn.innerText = 'Start Strict Study Session'; btn.className = 'btn mint'; }
       clearInterval(timerInt);
     }
     syncBlocker();
   }
 
   function syncBlocker() {
-    const s = document.getElementById('chkShorts').checked;
-    const r = document.getElementById('chkReels').checked;
+    const s = document.getElementById('chkShorts')?.checked ?? true;
+    const r = document.getElementById('chkReels')?.checked ?? true;
     if (window.AndroidBridge) window.AndroidBridge.updateBlockerState(timerRunning, s, r);
   }
   function openAcc() { if (window.AndroidBridge) window.AndroidBridge.openAccessibilitySettings(); }
@@ -420,7 +420,7 @@ class MainActivity : Activity() {
   window.refreshNativeStatus = function() {
     if (window.AndroidBridge && window.AndroidBridge.isAccessibilityEnabled()) {
       const b = document.getElementById('serviceBadge');
-      b.className = 'badge on'; b.innerText = 'Shield: ACTIVE';
+      if(b) { b.className = 'badge on'; b.innerText = 'Shield: ACTIVE'; }
     }
   };
 
@@ -439,14 +439,14 @@ class MainActivity : Activity() {
       noiseNode = audioCtx.createBufferSource();
       noiseNode.buffer = buf; noiseNode.loop = true;
       noiseNode.connect(audioCtx.destination); noiseNode.start(0);
-      btn.innerText = 'Stop Brown Noise'; btn.className = 'btn danger';
+      if(btn) { btn.innerText = 'Stop Brown Noise'; btn.className = 'btn danger'; }
     } else {
       audioCtx.close(); audioCtx = null;
-      btn.innerText = 'Play Deep Focus Brown Noise'; btn.className = 'btn';
+      if(btn) { btn.innerText = 'Play Deep Focus Brown Noise'; btn.className = 'btn'; }
     }
   }
 
-  render();
+  setTimeout(render, 100);
   window.refreshNativeStatus();
 </script>
 </body>
