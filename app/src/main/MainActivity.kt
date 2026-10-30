@@ -1,9 +1,6 @@
 package com.focusforge.pro
 
 import android.annotation.SuppressLint
-import android.app.Activity
-import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -14,17 +11,20 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
 
-class MainActivity : Activity() {
+class MainActivity : AppCompatActivity() {
 
     private var webView: WebView? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Color.parseColor("#0F172A")
-
+        
         try {
+            supportActionBar?.hide()
+            window.statusBarColor = Color.parseColor("#0F172A")
+
             webView = WebView(this).apply {
                 settings.apply {
                     javaScriptEnabled = true
@@ -34,12 +34,11 @@ class MainActivity : Activity() {
                 webChromeClient = WebChromeClient()
                 webViewClient = WebViewClient()
                 addJavascriptInterface(AndroidBridge(context), "AndroidBridge")
-                loadDataWithBaseURL("https://focusforge.local/", SAFE_DASHBOARD_HTML, "text/html", "UTF-8", null)
+                loadDataWithBaseURL("https://focusforge.local/", DASHBOARD_HTML, "text/html", "UTF-8", null)
             }
             setContentView(webView!!)
         } catch (e: Exception) {
-            Toast.makeText(this, "Startup Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-            finish()
+            Toast.makeText(this, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -67,18 +66,7 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface
-        fun openDeviceAdminSettings() {
-            try {
-                val comp = ComponentName(context, StrictDeviceAdminReceiver::class.java)
-                context.startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                    putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, comp)
-                    putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Prevents uninstalling during study sessions.")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                })
-            } catch (e: Exception) {
-                Toast.makeText(context, "Error opening Admin settings", Toast.LENGTH_SHORT).show()
-            }
-        }
+        fun openDeviceAdminSettings() {}
 
         @JavascriptInterface
         fun updateBlockerState(focusActive: Boolean, blockShorts: Boolean, blockReels: Boolean) {
@@ -91,7 +79,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
-        private const val SAFE_DASHBOARD_HTML = """
+        private const val DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -100,7 +88,7 @@ class MainActivity : Activity() {
 <title>FocusForge Pro</title>
 <style>
   body { background: #0F172A; color: #F8FAFC; font-family: sans-serif; padding: 20px; margin: 0; text-align: center; }
-  h1 { font-size: 22px; color: #38BDF8; margin-bottom: 5px; }
+  h1 { font-size: 24px; color: #38BDF8; margin-bottom: 5px; }
   .card { background: #1E293B; border-radius: 14px; padding: 16px; margin: 12px 0; text-align: left; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
   .title { font-size: 11px; font-weight: bold; color: #94A3B8; text-transform: uppercase; margin-bottom: 8px; }
   .btn { background: #4F46E5; color: white; border: none; border-radius: 10px; padding: 12px; width: 100%; font-size: 14px; font-weight: bold; margin-top: 8px; cursor: pointer; }
@@ -114,7 +102,7 @@ class MainActivity : Activity() {
 </head>
 <body>
   <h1>FocusForge Pro</h1>
-  <div style="font-size:12px;color:#94A3B8;">Streako Dashboard & Regain Shield</div>
+  <div style="font-size:12px;color:#94A3B8;">Student Focus & Blocker Dashboard</div>
   
   <div id="serviceBadge" class="badge" onclick="openAcc()">Shield: Tap to Enable</div>
 
@@ -125,7 +113,7 @@ class MainActivity : Activity() {
   </div>
 
   <div class="card">
-    <div class="title">Surgical Social Media Blocker</div>
+    <div class="title">Social Media Shield</div>
     <div class="row">
       <span>Block YouTube Shorts</span>
       <input type="checkbox" id="chkShorts" checked onchange="sync()">
@@ -134,16 +122,15 @@ class MainActivity : Activity() {
       <span>Block Instagram Reels</span>
       <input type="checkbox" id="chkReels" checked onchange="sync()">
     </div>
-    <button class="btn" onclick="openAcc()">1. Enable Accessibility Shield</button>
-    <button class="btn" style="background:#334155;" onclick="openAdmin()">2. Enable Anti-Uninstall Lock</button>
+    <button class="btn" onclick="openAcc()">Enable Accessibility Shield</button>
   </div>
 
   <div class="card">
-    <div class="title">Today's Habits & Study Check</div>
+    <div class="title">Daily Habit Checklist</div>
     <div class="row"><span>Review CA Law & Accounts</span> <input type="checkbox" checked></div>
     <div class="row"><span>Complete Assignments</span> <input type="checkbox"></div>
-    <div class="row"><span>45m Gym / Workout</span> <input type="checkbox" checked></div>
-    <div class="row"><span>Drink 8 Glasses Water</span> <input type="checkbox" checked></div>
+    <div class="row"><span>Gym / Workout 45m</span> <input type="checkbox" checked></div>
+    <div class="row"><span>Hydration (8 Glasses)</span> <input type="checkbox" checked></div>
   </div>
 
 <script>
@@ -177,7 +164,6 @@ class MainActivity : Activity() {
   }
 
   function openAcc() { if (window.AndroidBridge) window.AndroidBridge.openAccessibilitySettings(); }
-  function openAdmin() { if (window.AndroidBridge) window.AndroidBridge.openDeviceAdminSettings(); }
 
   window.refreshNativeStatus = function() {
     if (window.AndroidBridge && window.AndroidBridge.isAccessibilityEnabled()) {
