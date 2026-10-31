@@ -3,10 +3,9 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@drawable/ic_app_logo"
         android:label="FocusForge Pro"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Light">
+        android:theme="@style/Theme.AppCompat.NoActionBar">
 
         <activity
             android:name=".MainActivity"
