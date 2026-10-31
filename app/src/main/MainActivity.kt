@@ -1,6 +1,11 @@
 package com.focusforge.pro
 
 import android.app.AlertDialog
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.TimePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -15,6 +20,7 @@ import android.graphics.drawable.GradientDrawable
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.os.CountDownTimer
 import android.provider.Settings
 import android.text.InputType
@@ -22,6 +28,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -65,6 +72,14 @@ class MainActivity : AppCompatActivity() {
     private var exerciseSearchQuery = ""
     private val expandedExerciseIds = mutableSetOf("row_bb", "bench_bb", "pushup_bw")
     private var currentTab = 0
+
+    // Dashboard / session tracking
+    private var sessionType = "Study"
+    private var heatmapMode = "focus"
+    private lateinit var shieldScheduleContainer: LinearLayout
+    private lateinit var dashboardContainer: LinearLayout
+    private lateinit var sessionHistoryContainer: LinearLayout
+    private lateinit var revisionPlannerContainer: LinearLayout
 
     // Main Tab Containers
     private lateinit var tabFocusContainer: LinearLayout
@@ -205,6 +220,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("FocusForgePrefs", Context.MODE_PRIVATE)
         ensureDefaultDataInitialized()
+        DailyLog.reconcileToday(prefs)
+        requestNotificationPermissionIfNeeded()
 
         val mainScreen = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -381,7 +398,9 @@ class MainActivity : AppCompatActivity() {
                 tvTimerDisplay.text = formatTime(initialTimeMillis)
                 tvTimerStatus.text = "Session Complete! Great work!"
                 btnStartPause.text = "Start Focus"
+                applyKeepAwake(false)
                 playCompletionSound()
+                notifySessionComplete()
                 recordCompletedSession()
             }
         }
@@ -411,6 +430,12 @@ class MainActivity : AppCompatActivity() {
     // TAB 1: EXAM COUNTDOWN, FOCUS RINGS & CUSTOM H:M CLOCK
     // ====================================================
     private fun buildFocusTab() {
+        // ---- TODAY DASHBOARD (rebuilt by refreshAllUI) ----
+        val dashCard = createGlassCard("#10192D", "#38BDF8")
+        dashboardContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        dashCard.addView(dashboardContainer)
+        tabFocusContainer.addView(dashCard)
+
         tvExamCountdown = TextView(this).apply {
             setTextColor(Color.parseColor("#FDE047"))
             textSize = 13f
@@ -507,6 +532,42 @@ class MainActivity : AppCompatActivity() {
         presetRow.addView(createPillButton("1h 30m") { setTimerPreset(90 * 60 * 1000L, "1h 30m Deep • $selectedSubject") })
         presetRow.addView(createPillButton("3h Exam") { setTimerPreset(180 * 60 * 1000L, "3h CA Exam • $selectedSubject") })
 
+        // Session type chips (Study / Revision / Mock test)
+        val typeLabel = TextView(this).apply {
+            text = "SESSION TYPE"
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 10.5f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(4, 0, 0, 6)
+        }
+        val typeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 4, 0, 10)
+        }
+        sessionType = prefs.getString("session_type", "Study") ?: "Study"
+        val typeChips = mutableListOf<Button>()
+        listOf("📖 Study", "🔁 Revision", "🧪 Mock Test").forEach { label ->
+            val chip = Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 11f
+                setTypeface(null, Typeface.BOLD)
+                setPadding(18, 8, 18, 8)
+                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                lp.setMargins(4, 0, 4, 0)
+                layoutParams = lp
+                setOnClickListener {
+                    sessionType = label.substringAfter(" ").trim()
+                    prefs.edit().putString("session_type", sessionType).apply()
+                    refreshSessionTypeChips(typeChips)
+                }
+            }
+            typeChips.add(chip)
+            typeRow.addView(chip)
+        }
+        refreshSessionTypeChips(typeChips)
+
         cbStrictLock = CheckBox(this).apply {
             text = "🔒 Regain Strict Mode (Lock Shield until timer completes)"
             setTextColor(Color.parseColor("#FDE047"))
@@ -523,6 +584,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val cbKeepAwake = CheckBox(this).apply {
+            text = "💡 Keep screen awake during focus sessions"
+            setTextColor(Color.parseColor("#CBD5E1"))
+            textSize = 12.5f
+            isChecked = prefs.getBoolean("keep_screen_awake", true)
+            setPadding(10, 6, 10, 14)
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean("keep_screen_awake", checked).apply()
+            }
+        }
         val controlRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -569,13 +640,263 @@ class MainActivity : AppCompatActivity() {
 
         timerCard.addView(chipScroll)
         timerCard.addView(tvTimerDisplay)
+        timerCard.addView(typeLabel)
+        timerCard.addView(typeRow)
         timerCard.addView(tvTimerStatus)
         timerCard.addView(fineTuneRow)
         timerCard.addView(presetRow)
         timerCard.addView(cbStrictLock)
+        timerCard.addView(cbKeepAwake)
         timerCard.addView(controlRow)
         timerCard.addView(logActionsRow)
         tabFocusContainer.addView(timerCard)
+
+        // ---- RECENT FOCUS BLOCKS ----
+        val historyCard = createGlassCard("#10192D", "#2A4365")
+        historyCard.addView(createSectionLabel("🕘 RECENT FOCUS BLOCKS"))
+        sessionHistoryContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        historyCard.addView(sessionHistoryContainer)
+        tabFocusContainer.addView(historyCard)
+    }
+
+    // ----------------------------------------------------
+    // TODAY DASHBOARD
+    // ----------------------------------------------------
+    private fun renderDashboard() {
+        dashboardContainer.removeAllViews()
+
+        val focusToday = DailyLog.value(prefs, DailyLog.FIELD_FOCUS)
+        val goal = prefs.getInt("daily_focus_goal", 180).coerceAtLeast(15)
+        val habitsArr = JSONArray(prefs.getString("habits_matrix_json", "[]"))
+        val todayIndex = ((Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7)
+        var habitsDone = 0
+        for (i in 0 until habitsArr.length()) {
+            if (habitsArr.getJSONObject(i).getJSONArray("days").getBoolean(todayIndex)) habitsDone++
+        }
+        val gymWeek = DailyLog.weekTotal(prefs, DailyLog.FIELD_GYM)
+        val streak = DailyLog.currentStreak(prefs)
+        val best = DailyLog.bestStreak(prefs)
+        val blockedToday = DailyLog.value(prefs, DailyLog.FIELD_BLOCKS)
+
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val greeting = when {
+            hour < 5 -> "🌙 Late night grind"
+            hour < 12 -> "☀️ Good morning"
+            hour < 17 -> "🌤️ Good afternoon"
+            else -> "🌆 Good evening"
+        }
+        val dateLabel = SimpleDateFormat("EEE, dd MMM", Locale.getDefault()).format(Date())
+
+        val headRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        headRow.addView(TextView(this).apply {
+            text = "$greeting\n$dateLabel • Hunter Dashboard"
+            setTextColor(Color.parseColor("#E2E8F0"))
+            textSize = 13.5f
+            setTypeface(null, Typeface.BOLD)
+            setLineSpacing(4f, 1.1f)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        headRow.addView(TextView(this).apply {
+            text = if (streak > 0) "🔥 $streak-day streak" else "🌱 Start a streak"
+            setTextColor(if (streak > 0) Color.parseColor("#FDE047") else Color.parseColor("#94A3B8"))
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            background = createGlassDrawable("#1E293B", "#FACC15", 26f)
+            setPadding(20, 10, 20, 10)
+        })
+        dashboardContainer.addView(headRow)
+
+        // stat tiles
+        val tileRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 14, 0, 6)
+        }
+        tileRow.addView(dashboardTile("${focusToday}m", "Focus today", "#38BDF8"))
+        tileRow.addView(dashboardTile("$habitsDone/${habitsArr.length()}", "Habits", "#34D399"))
+        tileRow.addView(dashboardTile("$gymWeek", "Gym (7d)", "#F43F5E"))
+        tileRow.addView(dashboardTile("$blockedToday", "Blocked", "#FACC15"))
+        dashboardContainer.addView(tileRow)
+
+        // daily goal
+        val goalPct = ((focusToday.toFloat() / goal) * 100).toInt().coerceIn(0, 100)
+        val goalRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 12, 0, 2)
+        }
+        goalRow.addView(TextView(this).apply {
+            text = "🎯 Daily goal: $focusToday / ${goal}m"
+            setTextColor(if (goalPct >= 100) Color.parseColor("#6EE7B7") else Color.parseColor("#CBD5E1"))
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        goalRow.addView(TextView(this).apply {
+            text = if (best > 0) "Best: $best d" else "Edit goal ✏️"
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 11f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(10, 4, 4, 4)
+            setOnClickListener { showDailyGoalDialog() }
+        })
+        dashboardContainer.addView(goalRow)
+
+        dashboardContainer.addView(GoalBarView(this, goalPct / 100f).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 14)
+        })
+
+        // quick actions
+        val quickRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 14, 0, 0)
+        }
+        quickRow.addView(quickAction("▶ 25m", "#4F46E5", "#818CF8") {
+            setTimerPreset(25 * 60 * 1000L, "25m Pomodoro • $selectedSubject")
+            startTimer(resumeExisting = false)
+        })
+        quickRow.addView(quickAction("🎯 50m", "#0284C7", "#38BDF8") {
+            setTimerPreset(50 * 60 * 1000L, "50m Deep Work • $selectedSubject")
+            startTimer(resumeExisting = false)
+        })
+        quickRow.addView(quickAction("✓ Log", "#064E3B", "#10B981") { recordCompletedSession() })
+        quickRow.addView(quickAction("🛡️ Shield", "#7C2D12", "#FB923C") { switchTab(4) })
+        dashboardContainer.addView(quickRow)
+    }
+
+    private fun dashboardTile(value: String, label: String, colorHex: String): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = createGlassDrawable("#0B1528", "#1E293B", 18f)
+            setPadding(8, 14, 8, 14)
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            lp.setMargins(4, 0, 4, 0)
+            layoutParams = lp
+            addView(TextView(this@MainActivity).apply {
+                text = value
+                setTextColor(Color.parseColor(colorHex))
+                textSize = 19f
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 10f
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                setPadding(0, 4, 0, 0)
+            })
+        }
+    }
+
+    private fun quickAction(label: String, fillHex: String, strokeHex: String, onClick: () -> Unit): Button {
+        return Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 11f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = createGlassDrawable(fillHex, strokeHex, 20f)
+            setPadding(12, 12, 12, 12)
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            lp.setMargins(4, 0, 4, 0)
+            layoutParams = lp
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun showDailyGoalDialog() {
+        val input = EditText(this).apply {
+            setRawInputType(InputType.TYPE_CLASS_NUMBER)
+            setText(prefs.getInt("daily_focus_goal", 180).toString())
+            hint = "Minutes per day (e.g. 180)"
+            setPadding(50, 36, 50, 36)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("🎯 Set Daily Focus Goal")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val goal = input.text.toString().toIntOrNull()?.coerceIn(15, 960) ?: 180
+                prefs.edit().putInt("daily_focus_goal", goal).apply()
+                Toast.makeText(this, "🎯 Daily goal updated to ${goal}m", Toast.LENGTH_SHORT).show()
+                refreshAllUI()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // ----------------------------------------------------
+    // RECENT FOCUS BLOCKS
+    // ----------------------------------------------------
+    private fun renderSessionHistory() {
+        sessionHistoryContainer.removeAllViews()
+        val sessions = JSONArray(prefs.getString("session_log_json", "[]"))
+        if (sessions.length() == 0) {
+            sessionHistoryContainer.addView(TextView(this).apply {
+                text = "No focus blocks yet today. Start a session or tap ✓ Log to record one."
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 12f
+                setPadding(0, 6, 0, 6)
+            })
+            return
+        }
+
+        val startIdx = (sessions.length() - 1).coerceAtLeast(0)
+        val endIdx = (sessions.length() - 6).coerceAtLeast(0)
+        for (i in startIdx downTo endIdx) {
+            val o = sessions.optJSONObject(i) ?: continue
+            val mins = o.optInt("mins", 0)
+            val subj = o.optString("subject", selectedSubject)
+            val type = o.optString("type", "Study")
+            val at = o.optString("at", "")
+            val icon = when {
+                type.startsWith("Mock") -> "🧪"
+                type.startsWith("Rev") -> "🔁"
+                else -> "📖"
+            }
+            sessionHistoryContainer.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = createGlassDrawable("#0B1528", "#1E293B", 18f)
+                setPadding(20, 14, 18, 14)
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.setMargins(0, 0, 0, 8)
+                layoutParams = lp
+                addView(TextView(this@MainActivity).apply {
+                    text = "$icon $subj\n$type • $mins min • $at"
+                    setTextColor(Color.parseColor("#E2E8F0"))
+                    textSize = 11.5f
+                    setLineSpacing(3f, 1.1f)
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = "+${mins * 5} XP"
+                    setTextColor(Color.parseColor("#FDE047"))
+                    textSize = 11f
+                    setTypeface(null, Typeface.BOLD)
+                })
+            })
+        }
+
+        sessionHistoryContainer.addView(createMiniTagButton("↩️ Undo Last Block", "#450A0A", "#EF4444", "#FCA5A5") {
+            undoLastStudySession()
+        })
+    }
+
+    private fun refreshSessionTypeChips(chips: List<Button>) {
+        chips.forEach { chip ->
+            val label = chip.text.toString().substringAfter(" ").trim()
+            val isSel = label == sessionType
+            chip.setTextColor(if (isSel) Color.parseColor("#06121F") else Color.parseColor("#E2E8F0"))
+            chip.background = if (isSel) createGlassDrawable("#38BDF8", "#7DD3FC", 22f)
+            else createGlassDrawable("#111C31", "#334155", 22f)
+        }
     }
 
     private fun showExamCountdownDialog() {
@@ -729,6 +1050,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val subjectsArray = JSONArray(prefs.getString("syllabus_json", "[]"))
+        syllabusListContainer.addView(buildRevisionPlannerCard(subjectsArray))
         for (i in 0 until subjectsArray.length()) {
             val subjObj = subjectsArray.getJSONObject(i)
             val subjName = subjObj.getString("name")
@@ -841,14 +1163,31 @@ class MainActivity : AppCompatActivity() {
                     setOnClickListener {
                         val nextStatus = (status + 1) % 3
                         unitObj.put("status", nextStatus)
+                        RevisionPlanner.markCompleted(unitObj, nextStatus == 2)
                         prefs.edit().putString("syllabus_json", subjectsArray.toString()).apply()
-                        if (nextStatus == 2) addXp(35, "Unit Completed! +35 XP")
+                        if (nextStatus == 2) {
+                            addXp(35, "Unit Completed! +35 XP")
+                            Toast.makeText(
+                                this@MainActivity,
+                                "🔁 First revision scheduled for ${unitObj.optString("revDue")}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                         renderSyllabusCards()
                     }
                 }
 
+                val dueStr = unitObj.optString("revDue", "")
+                val dueHint = if (dueStr.isNotEmpty()) {
+                    val d = RevisionPlanner.daysUntil(dueStr)
+                    when {
+                        d < 0 -> "  •  🔴 Rev overdue ${-d}d"
+                        d == 0 -> "  •  🔔 Rev due today"
+                        else -> "  •  🗓️ Rev in ${d}d"
+                    }
+                } else ""
                 val tvModBadge = TextView(this).apply {
-                    text = "$moduleTag  •  $statusLabel"
+                    text = "$moduleTag  •  $statusLabel$dueHint"
                     setTextColor(Color.parseColor("#38BDF8"))
                     textSize = 11f
                     setTypeface(null, Typeface.BOLD)
@@ -864,9 +1203,15 @@ class MainActivity : AppCompatActivity() {
                 textCol.addView(tvUnitName)
 
                 val btnRev = createMiniTagButton("🔄 ${revisions}x", "#0F172A", "#38BDF8", "#38BDF8") {
-                    unitObj.put("rev", revisions + 1)
+                    val total = RevisionPlanner.logRevision(unitObj)
+                    DailyLog.bump(prefs, DailyLog.FIELD_FOCUS, 0)
                     prefs.edit().putString("syllabus_json", subjectsArray.toString()).apply()
-                    addXp(15, "Revision +1 logged! (+15 XP)")
+                    addXp(15, "Revision $total logged! (+15 XP)")
+                    Toast.makeText(
+                        this@MainActivity,
+                        "🗓️ Next revision: ${unitObj.optString("revDue")}",
+                        Toast.LENGTH_SHORT
+                    ).show()
                     renderSyllabusCards()
                 }
                 val btnEditUnit = createMiniTagButton("✏️", "#1E293B", "#334155", "#CBD5E1") { showEditUnitDialog(i, u) }
@@ -931,6 +1276,132 @@ class MainActivity : AppCompatActivity() {
             showAddVaultNoteDialog()
         })
         formulaVaultContainer.addView(vaultCard)
+    }
+
+    // ----------------------------------------------------
+    // SPACED-REVISION PLANNER
+    // ----------------------------------------------------
+    private fun buildRevisionPlannerCard(subjectsArray: JSONArray): LinearLayout {
+        val card = createGlassCard("#10192D", "#8B5CF6")
+        val readiness = RevisionPlanner.readiness(subjectsArray)
+        val due = RevisionPlanner.collectDue(subjectsArray, 8)
+        val upcoming = RevisionPlanner.upcomingCount(subjectsArray)
+
+        val headRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        headRow.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            addView(createSectionLabel("🔁 SPACED REVISION PLANNER"))
+            addView(TextView(this@MainActivity).apply {
+                text = "1 → 3 → 7 → 14 → 30 → 60 day smart cycles"
+                setTextColor(Color.parseColor("#A78BFA"))
+                textSize = 10.5f
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, 0, 0, 4)
+            })
+        })
+        headRow.addView(TextView(this).apply {
+            text = "${if (due.isEmpty()) "✅" else "🔔"} ${due.size} due\n🗓️ $upcoming scheduled"
+            setTextColor(if (due.isEmpty()) Color.parseColor("#6EE7B7") else Color.parseColor("#FDE047"))
+            textSize = 10.5f
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.END
+            setLineSpacing(3f, 1.0f)
+        })
+        card.addView(headRow)
+
+        // exam-readiness bar
+        card.addView(TextView(this).apply {
+            text = "🎯 Exam readiness: $readiness%"
+            setTextColor(Color.parseColor("#CBD5E1"))
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 12, 0, 6)
+        })
+        card.addView(GoalBarView(this, readiness / 100f, "#8B5CF6").apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 12)
+        })
+
+        if (due.isEmpty()) {
+            card.addView(TextView(this).apply {
+                text = "Nothing due today. Mark a unit ✅ Done to auto-schedule its first revision, or log revisions with 🔄."
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 11.5f
+                setPadding(0, 14, 0, 2)
+            })
+        } else {
+            due.forEach { d ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    background = createGlassDrawable("#0F172A", if (d.daysOverdue > 0) "#EF4444" else "#4C1D95", 18f)
+                    setPadding(20, 14, 16, 14)
+                    val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    lp.setMargins(0, 12, 0, 0)
+                    layoutParams = lp
+                }
+                row.addView(TextView(this).apply {
+                    text = "${if (d.daysOverdue > 0) "🔴" else "🔔"} ${d.title}\n${d.subject} • ${d.moduleTag} • ${d.revisions}x revised" +
+                        if (d.daysOverdue > 0) " • ${d.daysOverdue}d overdue" else " • due today"
+                    setTextColor(Color.parseColor("#E2E8F0"))
+                    textSize = 11.5f
+                    setLineSpacing(3f, 1.05f)
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                row.addView(createMiniTagButton("🔄 Did it", "#064E3B", "#10B981", "#6EE7B7") {
+                    val subj = subjectsArray.optJSONObject(d.subjectIndex) ?: return@createMiniTagButton
+                    val unit = subj.optJSONArray("units")?.optJSONObject(d.unitIndex) ?: return@createMiniTagButton
+                    val total = RevisionPlanner.logRevision(unit)
+                    unit.put("status", 2)
+                    prefs.edit().putString("syllabus_json", subjectsArray.toString()).apply()
+                    recordRevisionSession(d.subject)
+                    addXp(20, "Revision done! $total total (+20 XP)")
+                    renderSyllabusCards()
+                })
+                card.addView(row)
+            }
+        }
+
+        card.addView(createMiniTagButton("📌 Revise everything due (log a revision block)", "#1E1B4B", "#8B5CF6", "#DDD6FE") {
+            val dueNow = RevisionPlanner.collectDue(subjectsArray, 50)
+            if (dueNow.isEmpty()) {
+                Toast.makeText(this, "Nothing due right now 🎉", Toast.LENGTH_SHORT).show()
+                return@createMiniTagButton
+            }
+            dueNow.forEach { d ->
+                val subj = subjectsArray.optJSONObject(d.subjectIndex) ?: return@forEach
+                val unit = subj.optJSONArray("units")?.optJSONObject(d.unitIndex) ?: return@forEach
+                RevisionPlanner.logRevision(unit)
+                unit.put("status", 2)
+            }
+            prefs.edit().putString("syllabus_json", subjectsArray.toString()).apply()
+            addXp(20 * dueNow.size, "${dueNow.size} revisions logged (+${20 * dueNow.size} XP)")
+            renderSyllabusCards()
+        })
+
+        return card
+    }
+
+    private fun recordRevisionSession(subject: String) {
+        val mins = 25
+        val log = JSONArray(prefs.getString("session_log_json", "[]"))
+        log.put(
+            JSONObject()
+                .put("mins", mins)
+                .put("subject", subject)
+                .put("type", "Revision")
+                .put("at", SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date()))
+        )
+        while (log.length() > 100) log.remove(0)
+        prefs.edit()
+            .putString("session_log_json", log.toString())
+            .putInt("total_minutes", prefs.getInt("total_minutes", 0) + mins)
+            .putInt("sessions_completed", prefs.getInt("sessions_completed", 0) + 1)
+            .apply()
+        DailyLog.bump(prefs, DailyLog.FIELD_FOCUS, mins)
     }
 
     private fun showAddVaultNoteDialog() {
@@ -1131,6 +1602,8 @@ class MainActivity : AppCompatActivity() {
         tabConsistencyContainer.addView(consistencyContentContainer)
     }
 
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
     private fun renderConsistencyTab() {
         consistencyContentContainer.removeAllViews()
         val habitsArray = JSONArray(prefs.getString("habits_matrix_json", "[]"))
@@ -1175,6 +1648,59 @@ class MainActivity : AppCompatActivity() {
         })
         consistencyContentContainer.addView(bannerCard)
 
+        // ---- MOMENTUM HEATMAP ----
+        val heatCard = createGlassCard("#10192D", "#334155")
+        heatCard.addView(createSectionLabel("🗓️ MOMENTUM HEATMAP (LAST 5 WEEKS)"))
+        val toggleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 4, 0, 12)
+        }
+        listOf("focus" to "📖 Focus", "gym" to "🏋️ Gym", "habits" to "✅ Habits").forEach { (mode, label) ->
+            val selected = heatmapMode == mode
+            toggleRow.addView(TextView(this).apply {
+                text = label
+                setTextColor(if (selected) Color.parseColor("#06121F") else Color.parseColor("#CBD5E1"))
+                textSize = 11.5f
+                setTypeface(null, Typeface.BOLD)
+                background = if (selected) createGlassDrawable("#38BDF8", "#7DD3FC", 20f)
+                else createGlassDrawable("#111C31", "#334155", 20f)
+                setPadding(22, 12, 22, 12)
+                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                lp.setMargins(6, 0, 6, 0)
+                layoutParams = lp
+                gravity = Gravity.CENTER
+                setOnClickListener { heatmapMode = mode; renderConsistencyTab() }
+            })
+        }
+        heatCard.addView(toggleRow)
+
+        val field = when (heatmapMode) {
+            "gym" -> DailyLog.FIELD_GYM
+            "habits" -> DailyLog.FIELD_HABITS
+            else -> DailyLog.FIELD_FOCUS
+        }
+        val series = DailyLog.series(prefs, field, 35)
+        heatCard.addView(HeatmapView(this, series,
+            accentHex = when (heatmapMode) {
+                "gym" -> "#F43F5E"
+                "habits" -> "#34D399"
+                else -> "#38BDF8"
+            }
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(190))
+        })
+        heatCard.addView(TextView(this).apply {
+            val total = series.sum()
+            val unit = if (heatmapMode == "habits") "checkmarks" else "min"
+            text = "35-day total: $total $unit • avg ${total / 35}/day" +
+                if (heatmapMode != "habits") " • 🔥 ${DailyLog.currentStreak(prefs)}-day streak" else ""
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 12, 0, 0)
+        })
+        consistencyContentContainer.addView(heatCard)
+
         val matrixCard = createGlassCard("#10192D", "#2A4365")
         matrixCard.addView(createSectionLabel("7-DAY HABIT MATRIX (TAP ⚙️ TO EDIT OR DELETE HABIT)"))
 
@@ -1214,7 +1740,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             row.addView(TextView(this).apply {
-                text = "⚙️ $title"
+                val hStreak = HabitHistory.streak(prefs, title)
+                text = "⚙️ $title" + if (hStreak > 1) "  🔥${hStreak}" else ""
                 setTextColor(Color.WHITE)
                 textSize = 12f
                 setTypeface(null, Typeface.BOLD)
@@ -1239,6 +1766,11 @@ class MainActivity : AppCompatActivity() {
                         val newState = !checked
                         days.put(d, newState)
                         prefs.edit().putString("habits_matrix_json", habitsArray.toString()).apply()
+                        val todayIdx = (Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7
+                        HabitHistory.record(prefs, title, DailyLog.dayKey((todayIdx - d + 7) % 7), newState)
+                        if (d == todayIdx) {
+                            DailyLog.bump(prefs, DailyLog.FIELD_HABITS, if (newState) 1 else -1)
+                        }
                         addXp(if (newState) 20 else -20, if (newState) "Habit Checked! +20 XP" else "Checkmark Undone (-20 XP)")
                         refreshAllUI()
                     }
@@ -2203,7 +2735,77 @@ class MainActivity : AppCompatActivity() {
             }
         }
         reportCard.addView(bodyMapView)
+
+        // weekly gym goal
+        val gymWeek = DailyLog.weekTotal(prefs, DailyLog.FIELD_GYM)
+        val gymGoal = prefs.getInt("weekly_gym_goal", 5).coerceAtLeast(1)
+        reportCard.addView(TextView(this).apply {
+            text = "🏋️ This week: $gymWeek/$gymGoal sessions" +
+                if (gymWeek >= gymGoal) "  ✅ target hit" else "  • ${gymGoal - gymWeek} to go"
+            setTextColor(Color.parseColor("#CBD5E1"))
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 12, 0, 6)
+            setOnClickListener { showWeeklyGymGoalDialog() }
+        })
+        reportCard.addView(GoalBarView(this, (gymWeek.toFloat() / gymGoal), "#F43F5E").apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 12).apply {
+                setMargins(0, 0, 0, 10)
+            }
+        })
         workoutContentContainer.addView(reportCard)
+
+        // ---- PERSONAL RECORDS & 1RM ----
+        val prCard = createGlassCard("#10192D", "#FACC15")
+        prCard.addView(createSectionLabel("🏆 PERSONAL RECORDS & 1RM ESTIMATES"))
+        val setsState = JSONObject(prefs.getString("workout_sets_json", "{}"))
+        val catalog = getFullExerciseCatalog()
+        val nameOf: (String) -> String = { id -> catalog.firstOrNull { it.id == id }?.name ?: id }
+        val prs = PRTracker.topLifts(setsState, nameOf, 6)
+        if (prs.isEmpty()) {
+            prCard.addView(TextView(this).apply {
+                text = "Tick off sets in the Training tab and your best lifts will show up here automatically."
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 11.5f
+                setPadding(0, 6, 0, 12)
+            })
+        } else {
+            prs.forEachIndexed { idx, pr ->
+                val medal = when (idx) {
+                    0 -> "🥇"
+                    1 -> "🥈"
+                    2 -> "🥉"
+                    else -> "•"
+                }
+                prCard.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    background = createGlassDrawable("#0B1528", "#334155", 18f)
+                    setPadding(20, 14, 16, 14)
+                    val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    lp.setMargins(0, 0, 0, 8)
+                    layoutParams = lp
+                    addView(TextView(this@MainActivity).apply {
+                        text = "$medal ${pr.name}\n${pr.weightKg}kg × ${pr.reps} • vol ${pr.volumeKg}kg"
+                        setTextColor(Color.parseColor("#E2E8F0"))
+                        textSize = 11.5f
+                        setLineSpacing(3f, 1.05f)
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    })
+                    addView(TextView(this@MainActivity).apply {
+                        text = "1RM\n${pr.estOneRm}kg"
+                        setTextColor(Color.parseColor("#FDE047"))
+                        textSize = 12f
+                        setTypeface(null, Typeface.BOLD)
+                        gravity = Gravity.CENTER
+                    })
+                })
+            }
+        }
+        prCard.addView(createActionButton("🧮 Open 1RM Calculator", "#78350F", "#FACC15") {
+            showOneRmCalculator()
+        })
+        workoutContentContainer.addView(prCard)
 
         // Custom Workout Logger & Undo History Card
         val historyCard = createGlassCard("#10192D", "#F59E0B")
@@ -2575,6 +3177,67 @@ class MainActivity : AppCompatActivity() {
         return totalVol
     }
 
+    private fun showWeeklyGymGoalDialog() {
+        val input = EditText(this).apply {
+            setRawInputType(InputType.TYPE_CLASS_NUMBER)
+            setText(prefs.getInt("weekly_gym_goal", 5).toString())
+            setPadding(50, 36, 50, 36)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("🏋️ Weekly Gym Target")
+            .setMessage("How many sessions per week?")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                prefs.edit().putInt("weekly_gym_goal", input.text.toString().toIntOrNull()?.coerceIn(1, 14) ?: 5).apply()
+                refreshAllUI()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showOneRmCalculator() {
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(50, 32, 50, 16) }
+        val inputKg = EditText(this).apply {
+            hint = "Weight lifted (kg)"
+            setRawInputType(InputType.TYPE_CLASS_NUMBER)
+            setText("60")
+        }
+        val inputReps = EditText(this).apply {
+            hint = "Reps completed"
+            setRawInputType(InputType.TYPE_CLASS_NUMBER)
+            setText("8")
+        }
+        layout.addView(inputKg)
+        layout.addView(inputReps)
+
+        AlertDialog.Builder(this)
+            .setTitle("🧮 1RM Calculator")
+            .setView(layout)
+            .setPositiveButton("Calculate") { _, _ ->
+                val kg = inputKg.text.toString().toIntOrNull() ?: 0
+                val reps = inputReps.text.toString().toIntOrNull() ?: 0
+                val epley = PRTracker.estOneRm(kg, reps)
+                val brz = PRTracker.brzycki(kg, reps)
+                val body = buildString {
+                    append("Epley estimate: $epley kg\n")
+                    append("Brzycki estimate: $brz kg\n\n")
+                    append("Suggested working weights:\n")
+                    listOf(95 to "1 rep max", 90 to "3 reps", 85 to "5 reps", 80 to "8 reps", 75 to "10 reps", 70 to "12 reps")
+                        .forEach { (pct, note) ->
+                            append("• ${(epley * pct / 100.0).toInt()} kg — $pct% ($note)\n")
+                        }
+                    append("\nTip: log sets in Training tab to auto-track PRs.")
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("💪 Your Strength Profile")
+                    .setMessage(body)
+                    .setPositiveButton("Got it", null)
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun showEditSetDialog(setsStateObj: JSONObject, exId: String, setIndex: Int) {
         val setObj = setsStateObj.getJSONArray(exId).getJSONObject(setIndex)
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(50, 32, 50, 16) }
@@ -2620,8 +3283,260 @@ class MainActivity : AppCompatActivity() {
             .putInt("workout_minutes", totalMins)
             .putString("workout_logs_json", logs.toString())
             .apply()
+        DailyLog.bump(prefs, DailyLog.FIELD_GYM, mins)
         addXp(60, "💪 $type (${mins}m) Logged! +60 XP")
         refreshAllUI()
+    }
+
+    // ----------------------------------------------------
+    // SHIELD SCHEDULE / SNOOZE / WHITELIST
+    // ----------------------------------------------------
+    private fun renderShieldScheduleCard() {
+        if (!::shieldScheduleContainer.isInitialized) return
+        shieldScheduleContainer.removeAllViews()
+
+        val card = createGlassCard("#10192D", "#8B5CF6")
+        card.addView(createSectionLabel("⏰ FOCUS HOURS & SNOOZE"))
+
+        val scheduleOn = prefs.getBoolean(ShieldGuard.PREF_SCHEDULE_ON, false)
+        val start = prefs.getString(ShieldGuard.PREF_START, "08:00") ?: "08:00"
+        val end = prefs.getString(ShieldGuard.PREF_END, "22:00") ?: "22:00"
+        val guarding = ShieldGuard.isGuarding(prefs)
+        val snoozed = ShieldGuard.isSnoozed(prefs)
+
+        card.addView(TextView(this).apply {
+            text = when {
+                snoozed -> "😴 Shield snoozed for ${ShieldGuard.snoozeMinutesLeft(prefs)} more min"
+                !prefs.getBoolean("blocker_enabled", false) -> "⚠️ Shield master switch is OFF"
+                guarding -> "🟢 Shield active right now"
+                else -> "🌙 Outside focus hours — shield resting"
+            }
+            setTextColor(
+                when {
+                    snoozed -> Color.parseColor("#FDE047")
+                    guarding -> Color.parseColor("#6EE7B7")
+                    else -> Color.parseColor("#FCA5A5")
+                }
+            )
+            textSize = 12.5f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 4, 0, 12)
+        })
+
+        card.addView(CheckBox(this).apply {
+            text = "Only guard during my focus hours"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            isChecked = scheduleOn
+            setPadding(12, 6, 12, 6)
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean(ShieldGuard.PREF_SCHEDULE_ON, checked).apply()
+                renderShieldScheduleCard()
+            }
+        })
+
+        val timeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 6, 0, 12)
+        }
+        timeRow.addView(timeButton("🌅 Start", start) { picked ->
+            prefs.edit().putString(ShieldGuard.PREF_START, picked).apply()
+            renderShieldScheduleCard()
+        })
+        timeRow.addView(timeButton("🌇 End", end) { picked ->
+            prefs.edit().putString(ShieldGuard.PREF_END, picked).apply()
+            renderShieldScheduleCard()
+        })
+        card.addView(timeRow)
+
+        // presets
+        val presetRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, 12) }
+        listOf("06:00-12:00" to "🌄 Morning", "14:00-20:00" to "☀️ Afternoon", "20:00-01:00" to "🌙 Night Owl").forEach { (range, label) ->
+            presetRow.addView(TextView(this).apply {
+                text = label
+                setTextColor(Color.parseColor("#DDD6FE"))
+                textSize = 10.5f
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                background = createGlassDrawable("#1E1B4B", "#8B5CF6", 18f)
+                setPadding(12, 10, 12, 10)
+                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                lp.setMargins(4, 0, 4, 0)
+                layoutParams = lp
+                setOnClickListener {
+                    val parts = range.split("-")
+                    prefs.edit()
+                        .putBoolean(ShieldGuard.PREF_SCHEDULE_ON, true)
+                        .putString(ShieldGuard.PREF_START, parts[0])
+                        .putString(ShieldGuard.PREF_END, parts[1])
+                        .apply()
+                    Toast.makeText(this@MainActivity, "⏰ Focus hours: $range", Toast.LENGTH_SHORT).show()
+                    renderShieldScheduleCard()
+                }
+            })
+        }
+        card.addView(presetRow)
+
+        // snooze row
+        val snoozeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, 6) }
+        snoozeRow.addView(TextView(this).apply {
+            text = "😴 Snooze shield:"
+            setTextColor(Color.parseColor("#CBD5E1"))
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 8, 12, 8)
+        })
+        listOf(15, 30).forEach { mins ->
+            snoozeRow.addView(TextView(this).apply {
+                text = "${mins}m"
+                setTextColor(Color.parseColor("#FDE047"))
+                textSize = 11f
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                background = createGlassDrawable("#422006", "#F59E0B", 16f)
+                setPadding(16, 8, 16, 8)
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.setMargins(4, 0, 4, 0)
+                layoutParams = lp
+                setOnClickListener {
+                    if (isTimerRunning) {
+                        Toast.makeText(this@MainActivity, "🔒 Can't snooze during a strict focus session.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        ShieldGuard.snooze(prefs, mins)
+                        Toast.makeText(this@MainActivity, "😴 Shield snoozed for $mins min", Toast.LENGTH_SHORT).show()
+                        renderShieldScheduleCard()
+                    }
+                }
+            })
+        }
+        if (snoozed) {
+            snoozeRow.addView(TextView(this).apply {
+                text = "▶ Resume"
+                setTextColor(Color.parseColor("#6EE7B7"))
+                textSize = 11f
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                background = createGlassDrawable("#064E3B", "#10B981", 16f)
+                setPadding(16, 8, 16, 8)
+                setOnClickListener {
+                    ShieldGuard.clearSnooze(prefs)
+                    renderShieldScheduleCard()
+                }
+            })
+        }
+        card.addView(snoozeRow)
+
+        // whitelist
+        card.addView(TextView(this).apply {
+            text = "🟢 ALLOWED APPS (whitelist — untouched by the shield)"
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 10.5f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 16, 0, 10)
+        })
+
+        val common = listOf(
+            "com.whatsapp" to "WhatsApp",
+            "com.google.android.dialer" to "Phone",
+            "com.google.android.apps.messaging" to "Messages",
+            "com.google.android.deskclock" to "Clock / Alarm",
+            "com.google.android.calculator" to "Calculator",
+            "com.focusforge.pro" to "FocusForge",
+            "com.google.android.apps.photos" to "Photos"
+        )
+        val wlArr = ShieldGuard.whitelist(prefs)
+        for ((pkg, label) in common) {
+            val checked = ShieldGuard.isWhitelisted(prefs, pkg)
+            card.addView(CheckBox(this).apply {
+                text = label
+                setTextColor(Color.WHITE)
+                textSize = 12.5f
+                isChecked = checked
+                setPadding(12, 2, 12, 2)
+                setOnCheckedChangeListener { _, c ->
+                    if (c) ShieldGuard.addWhitelist(prefs, pkg, label) else ShieldGuard.removeWhitelist(prefs, pkg)
+                    if (isTimerRunning) Toast.makeText(this@MainActivity, "Allowed apps updated (applies next session)", Toast.LENGTH_SHORT).show()
+                }
+            })
+        }
+        // custom whitelist entries
+        for (i in 0 until wlArr.length()) {
+            val o = wlArr.optJSONObject(i) ?: continue
+            val pkg = o.optString("pkg", "")
+            if (common.any { it.first == pkg } || pkg.isEmpty()) continue
+            card.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(this@MainActivity).apply {
+                    text = "🟢 ${o.optString("name", pkg)}\n$pkg"
+                    setTextColor(Color.parseColor("#CBD5E1"))
+                    textSize = 11f
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                addView(createMiniTagButton("✕", "#450A0A", "#EF4444", "#FCA5A5") {
+                    ShieldGuard.removeWhitelist(prefs, pkg)
+                    renderShieldScheduleCard()
+                })
+            })
+        }
+        card.addView(createMiniTagButton("+ Allow a custom app package", "#1E1B4B", "#8B5CF6", "#DDD6FE") {
+            val input = EditText(this).apply {
+                hint = "e.g. com.google.android.apps.youtube.music"
+                setPadding(50, 36, 50, 36)
+            }
+            AlertDialog.Builder(this)
+                .setTitle("🟢 Whitelist an App")
+                .setMessage("Enter the Android package name.")
+                .setView(input)
+                .setPositiveButton("Allow") { _, _ ->
+                    val pkg = input.text.toString().trim()
+                    if (pkg.contains(".")) {
+                        ShieldGuard.addWhitelist(prefs, pkg, pkg.substringAfterLast("."))
+                        renderShieldScheduleCard()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        })
+
+        shieldScheduleContainer.addView(card)
+    }
+
+    private fun timeButton(label: String, current: String, onPicked: (String) -> Unit): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = createGlassDrawable("#0B1528", "#8B5CF6", 20f)
+            setPadding(20, 14, 20, 14)
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            lp.setMargins(6, 0, 6, 0)
+            layoutParams = lp
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                setTextColor(Color.parseColor("#A78BFA"))
+                textSize = 10.5f
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = current
+                setTextColor(Color.WHITE)
+                textSize = 19f
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                setPadding(0, 4, 0, 0)
+            })
+            setOnClickListener {
+                val parts = current.split(":")
+                val h = parts.getOrNull(0)?.toIntOrNull() ?: 8
+                val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                TimePickerDialog(this@MainActivity, { _, hh, mm ->
+                    onPicked(String.format(Locale.US, "%02d:%02d", hh, mm))
+                }, h, m, true).show()
+            }
+        }
     }
 
     private fun showCustomWorkoutDialog() {
@@ -2717,6 +3632,9 @@ class MainActivity : AppCompatActivity() {
 
         customBlockedAppsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         tabShieldContainer.addView(customBlockedAppsContainer)
+
+        shieldScheduleContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        tabShieldContainer.addView(shieldScheduleContainer)
 
         val backupCard = createGlassCard("#10192D", "#10B981")
         backupCard.addView(createSectionLabel("💾 CLOUD / CLIPBOARD DATA BACKUP & RESTORE"))
@@ -2995,10 +3913,13 @@ class MainActivity : AppCompatActivity() {
             tvAccessibilityBanner.background = createGlassDrawable("#7F1D1D", "#EF4444", 22f)
         }
 
+        renderDashboard()
+        renderSessionHistory()
         renderSyllabusCards()
         renderConsistencyTab()
         renderWorkoutStudioTab()
         renderCustomBlockedAppsCard()
+        renderShieldScheduleCard()
     }
 
     private fun addXp(amount: Int, toastMsg: String) {
@@ -3030,6 +3951,20 @@ class MainActivity : AppCompatActivity() {
             .putString("last_logged_subj", selectedSubject)
             .apply()
 
+        val log = JSONArray(prefs.getString("session_log_json", "[]"))
+        log.put(
+            JSONObject()
+                .put("mins", addedMins)
+                .put("subject", selectedSubject)
+                .put("type", sessionType)
+                .put("at", SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date()))
+        )
+        while (log.length() > 100) log.remove(0)
+        prefs.edit().putString("session_log_json", log.toString()).apply()
+
+        DailyLog.bump(prefs, DailyLog.FIELD_FOCUS, addedMins)
+        DailyLog.reconcileToday(prefs)
+
         refreshAllUI()
         Toast.makeText(this, "🎉 +${addedMins}m logged for $selectedSubject! (+$earnedXp XP)", Toast.LENGTH_LONG).show()
     }
@@ -3055,6 +3990,11 @@ class MainActivity : AppCompatActivity() {
             .putInt("hunter_xp", newXp)
             .putInt("last_logged_mins", 0)
             .apply()
+
+        val log = JSONArray(prefs.getString("session_log_json", "[]"))
+        if (log.length() > 0) log.remove(log.length() - 1)
+        prefs.edit().putString("session_log_json", log.toString()).apply()
+        DailyLog.bump(prefs, DailyLog.FIELD_FOCUS, -lastMins)
 
         refreshAllUI()
         Toast.makeText(this, "↩️ Undid ${lastMins}m session for $lastSubj (-$deductedXp XP)", Toast.LENGTH_SHORT).show()
@@ -3100,12 +4040,15 @@ class MainActivity : AppCompatActivity() {
                 tvTimerDisplay.text = formatTime(initialTimeMillis)
                 tvTimerStatus.text = "Session Complete! Great work!"
                 btnStartPause.text = "Start Focus"
+                applyKeepAwake(false)
                 playCompletionSound()
+                notifySessionComplete()
                 recordCompletedSession()
             }
         }.start()
 
         isTimerRunning = true
+        applyKeepAwake(true)
         tvTimerStatus.text = "🔥 Focusing on $selectedSubject — Strict Shield Locked"
         btnStartPause.text = "Pause"
     }
@@ -3117,9 +4060,56 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {}
     }
 
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 701)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun applyKeepAwake(active: Boolean) {
+        try {
+            if (active && prefs.getBoolean("keep_screen_awake", true)) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun notifySessionComplete() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel("focusforge_done") == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel("focusforge_done", "Session Complete", NotificationManager.IMPORTANCE_HIGH)
+                )
+            }
+            val notif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, "focusforge_done")
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this)
+            }
+            val intent = Intent(this, MainActivity::class.java)
+            val pi = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            notif.setContentTitle("✅ Focus block complete")
+                .setContentText("$selectedSubject • ${initialTimeMillis / 60000} min logged. Nice work!")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+            nm.notify(1101, notif.build())
+        } catch (_: Exception) {}
+    }
+
     private fun pauseTimer() {
         countDownTimer?.cancel()
         isTimerRunning = false
+        applyKeepAwake(false)
         prefs.edit().putBoolean("timer_is_active", false).apply()
         tvTimerStatus.text = "Paused • $selectedSubject"
         btnStartPause.text = "Resume"
@@ -3128,6 +4118,7 @@ class MainActivity : AppCompatActivity() {
     private fun resetTimer() {
         countDownTimer?.cancel()
         isTimerRunning = false
+        applyKeepAwake(false)
         prefs.edit().putBoolean("timer_is_active", false).putLong("timer_end_millis", 0L).apply()
         timeLeftInMillis = initialTimeMillis
         tvTimerDisplay.text = formatTime(timeLeftInMillis)
