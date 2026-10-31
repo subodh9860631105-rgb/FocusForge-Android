@@ -46,19 +46,16 @@ class FocusAccessibilityService : AccessibilityService() {
         val blockInsta = prefs.getBoolean("block_insta", true)
         val blockSocialGames = prefs.getBoolean("block_social_games", true)
 
-        // 1. Full YouTube Lock (if enabled)
         if (pkg.contains("youtube") && blockFullYoutube) {
             triggerBlock(prefs, "YouTube is locked during Strict Study Mode!", goHome = true)
             return
         }
 
-        // 2. Instagram Lock
         if (pkg == "com.instagram.android" && blockInsta) {
             triggerBlock(prefs, "Instagram & Reels blocked! Stay focused.", goHome = true)
             return
         }
 
-        // 3. Social Media & Distracting Apps Lock
         val socialPackages = setOf(
             "com.facebook.katana",
             "com.snapchat.android",
@@ -71,7 +68,6 @@ class FocusAccessibilityService : AccessibilityService() {
             return
         }
 
-        // 4. YouTube Shorts Blocker (Allows study videos, blocks Shorts player)
         if (pkg.contains("youtube") && blockShortsOnly) {
             val rootNode = rootInActiveWindow ?: event.source ?: return
             if (isYoutubeShortsActive(rootNode)) {
