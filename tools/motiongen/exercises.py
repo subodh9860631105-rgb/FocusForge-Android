@@ -39,7 +39,7 @@ def db_at_hands(size=1.0):
         out = []
         for side in ("n", "f"):
             h = sk["hand_" + side]
-            out.append(("dumbbell", "front", h[0], h[1], 90))
+            out.append(("dumbbell", "front", h[0], h[1], 0))
         return out
     return fn
 
@@ -437,12 +437,12 @@ add(E("hammer_curl", "side",
 add(E("shoulder_db", "front",
       base=dict(root=(0.500, 0.500), spread=1.0,
                 ankle_n=(0.575, 0.920), ankle_f=(0.425, 0.920), foot_n=22, foot_f=-22,
-                hand_n=(0.630, 0.330), hand_f=(0.370, 0.330)),
+                hand_n=(0.610, 0.315), hand_f=(0.390, 0.315)),
       frames=[
-          (0.00, dict(hand_n=(0.640, 0.300), hand_f=(0.360, 0.300))),
-          (0.40, dict(hand_n=(0.620, 0.170), hand_f=(0.380, 0.170))),
-          (0.52, dict(hand_n=(0.618, 0.164), hand_f=(0.382, 0.164))),
-          (1.00, dict(hand_n=(0.640, 0.300), hand_f=(0.360, 0.300))),
+          (0.00, dict(hand_n=(0.610, 0.315), hand_f=(0.390, 0.315))),
+          (0.40, dict(hand_n=(0.585, 0.055), hand_f=(0.415, 0.055))),
+          (0.52, dict(hand_n=(0.584, 0.048), hand_f=(0.416, 0.048))),
+          (1.00, dict(hand_n=(0.610, 0.315), hand_f=(0.390, 0.315))),
       ],
       gear=[("floor", "back", 0.955)],
       gear_fn=db_at_hands(),

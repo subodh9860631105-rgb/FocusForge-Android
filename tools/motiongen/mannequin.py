@@ -522,13 +522,20 @@ def draw_glow(cv, sk, pose):
             stamp_seg(mixp(sk["knee_" + side], sk["ankle_" + side], a),
                       mixp(sk["knee_" + side], sk["ankle_" + side], b), RADII["calf"] * 0.85, inten)
         elif kind == "chest":
-            stamp_blob(mixp(sk["shoulder"], sk["root"], 0.32), 0.092, 0.042, inten, sk["lean"])
+            c = mixp(sk["shoulder"], sk["root"], 0.30)
+            if sk["side_view"]:
+                stamp_blob(c, 0.080, 0.038, inten, sk["lean"])
+            else:
+                for side in (-1, 1):
+                    stamp_blob((c[0] + side * 0.052, c[1] + 0.004), 0.048, 0.036, inten, sk["lean"])
         elif kind == "abs":
-            stamp_blob(mixp(sk["shoulder"], sk["root"], 0.68), 0.062, 0.058, inten, sk["lean"])
+            c = mixp(sk["shoulder"], sk["root"], 0.68)
+            stamp_blob(c, 0.055 if sk["side_view"] else 0.072, 0.055, inten, sk["lean"])
         elif kind == "back":
             stamp_blob(mixp(sk["shoulder"], sk["root"], 0.42), 0.093, 0.070, inten, sk["lean"])
         elif kind == "delts":
-            stamp_blob(mixp(sk["sh_n"], sk["sh_f"], 0.5), 0.115, 0.045, inten, sk["lean"])
+            for side in ("n", "f"):
+                stamp_blob(sk["sh_" + side], 0.055, 0.038, inten, sk["lean"])
         elif kind == "glute":
             stamp_blob(mixp(sk["hip_n"], sk["hip_f"], 0.5), 0.090, 0.048, inten, sk["lean"])
 
