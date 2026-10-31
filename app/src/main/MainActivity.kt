@@ -1,6 +1,5 @@
 package com.focusforge.pro
 
-import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -23,7 +22,6 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.animation.LinearInterpolator
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -41,7 +39,6 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 class MainActivity : AppCompatActivity() {
 
@@ -1588,8 +1585,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            val animThumb = ExerciseAnimView(this, ex.animType).apply {
-                layoutParams = LinearLayout.LayoutParams(135, 135).apply { setMargins(0, 0, 18, 0) }
+            val animThumb = MotionFigureView(this, ex.id).apply {
+                layoutParams = LinearLayout.LayoutParams(140, 140).apply { setMargins(0, 0, 18, 0) }
                 setOnClickListener { showExerciseVideoGuideDialog(ex) }
             }
 
@@ -1862,11 +1859,11 @@ class MainActivity : AppCompatActivity() {
         val muscleCard = createGlassCard("#10192D", "#EF4444")
         muscleCard.addView(createSectionLabel("STEP 2: SELECT FOCUS AREA (TAP BODY MAP OR MUSCLE BANNER)"))
 
-        val interactiveBodyMap = MuscleBodyMapView(this, selectedMuscleFilter) { tappedMuscle ->
+        val interactiveBodyMap = AnatomyMapView(this, selectedMuscleFilter, { tappedMuscle ->
             selectedMuscleFilter = tappedMuscle
             selectedSplitFilter = "All"
             renderWorkoutStudioTab()
-        }.apply {
+        }).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 340).apply {
                 setMargins(0, 10, 0, 18)
             }
@@ -1931,6 +1928,57 @@ class MainActivity : AppCompatActivity() {
             banner.addView(col)
             banner.addView(badge)
             muscleCard.addView(banner)
+        }
+
+        // Step 3: Live motion preview of the matching exercises (3D mannequin demos)
+        val matchedPreview = getFullExerciseCatalog().filter { ex ->
+            (selectedMuscleFilter == "All" || ex.muscle.equals(selectedMuscleFilter, true) ||
+                ex.secondaryMuscles.contains(selectedMuscleFilter, true)) &&
+            (selectedEquipmentFilter == "All" || ex.equipment.equals(selectedEquipmentFilter, true))
+        }.take(8)
+
+        if (matchedPreview.isNotEmpty()) {
+            muscleCard.addView(TextView(this).apply {
+                text = "STEP 3: PREVIEW THE MOVEMENTS (${matchedPreview.size} MATCHING DEMOS)"
+                setTextColor(Color.parseColor("#FCA5A5"))
+                textSize = 11f
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, 16, 0, 10)
+            })
+
+            val previewScroll = HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                setPadding(0, 0, 0, 10)
+            }
+            val previewRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+
+            matchedPreview.forEach { ex ->
+                val tile = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    background = createGlassDrawable("#0B1324", "#243B61", 20f)
+                    setPadding(10, 10, 10, 12)
+                    val lp = LinearLayout.LayoutParams(170, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    lp.setMargins(0, 0, 12, 0)
+                    layoutParams = lp
+                    setOnClickListener { showExerciseVideoGuideDialog(ex) }
+                }
+                tile.addView(MotionFigureView(this, ex.id).apply {
+                    layoutParams = LinearLayout.LayoutParams(148, 148)
+                })
+                tile.addView(TextView(this).apply {
+                    text = ex.name
+                    setTextColor(Color.WHITE)
+                    textSize = 10.5f
+                    setTypeface(null, Typeface.BOLD)
+                    gravity = Gravity.CENTER
+                    maxLines = 2
+                    setPadding(2, 6, 2, 0)
+                })
+                previewRow.addView(tile)
+            }
+            previewScroll.addView(previewRow)
+            muscleCard.addView(previewScroll)
         }
 
         val matchingCount = getFullExerciseCatalog().count { ex ->
@@ -2036,8 +2084,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            val animMini = ExerciseAnimView(this, ex.animType).apply {
-                layoutParams = LinearLayout.LayoutParams(120, 120).apply { setMargins(0, 0, 18, 0) }
+            val animMini = MotionFigureView(this, ex.id).apply {
+                layoutParams = LinearLayout.LayoutParams(124, 124).apply { setMargins(0, 0, 18, 0) }
                 setOnClickListener { showExerciseVideoGuideDialog(ex) }
             }
 
@@ -2146,10 +2194,10 @@ class MainActivity : AppCompatActivity() {
         metricsRow.addView(createStatColumn("$totalVolumeKg", "Volume (kg)", "#F43F5E"))
         reportCard.addView(metricsRow)
 
-        val bodyMapView = MuscleBodyMapView(this, selectedMuscleFilter) { tapped ->
+        val bodyMapView = AnatomyMapView(this, selectedMuscleFilter, { tapped ->
             selectedMuscleFilter = tapped
             renderWorkoutStudioTab()
-        }.apply {
+        }).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 330).apply {
                 setMargins(0, 20, 0, 8)
             }
@@ -2241,13 +2289,63 @@ class MainActivity : AppCompatActivity() {
         }
         container.addView(tvTitlePill)
 
-        // Large Dual-Pose Animated Biomechanics Canvas
-        val bigAnimPlayer = ExerciseAnimView(this, ex.animType).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 360).apply {
-                setMargins(0, 0, 0, 18)
+        // Large animated 3D mannequin demonstration (tap to pause / replay)
+        val bigAnimPlayer = MotionFigureView(this, ex.id).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 380).apply {
+                setMargins(0, 0, 0, 10)
             }
         }
         container.addView(bigAnimPlayer)
+
+        // Playback controls: pause/resume + slow motion
+        val playbackRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 8)
+        }
+        var slowMo = false
+        val btnPlayPause = Button(this).apply {
+            text = "⏸ Pause"
+            isAllCaps = false
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#E2E8F0"))
+            background = createGlassDrawable("#111C31", "#334155", 22f)
+            setPadding(26, 8, 26, 8)
+            setOnClickListener {
+                val nowPaused = !bigAnimPlayer.isPaused()
+                bigAnimPlayer.setPaused(nowPaused)
+                text = if (nowPaused) "▶ Play" else "⏸ Pause"
+            }
+        }
+        val btnSlow = Button(this).apply {
+            text = "🐢 Slow-mo"
+            isAllCaps = false
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#E2E8F0"))
+            background = createGlassDrawable("#111C31", "#334155", 22f)
+            setPadding(26, 8, 26, 8)
+            setOnClickListener {
+                slowMo = !slowMo
+                bigAnimPlayer.setSpeed(if (slowMo) 0.5f else 1f)
+                text = if (slowMo) "🐇 Normal" else "🐢 Slow-mo"
+            }
+        }
+        playbackRow.addView(btnPlayPause)
+        val gap = View(this)
+        gap.layoutParams = LinearLayout.LayoutParams(10, 1)
+        playbackRow.addView(gap)
+        playbackRow.addView(btnSlow)
+        container.addView(playbackRow)
+
+        container.addView(TextView(this).apply {
+            text = "Tap the animation to pause • looped 3D motion demo"
+            setTextColor(Color.parseColor("#64748B"))
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 16)
+        })
 
         // Segmented Toggle: [ Muscle ] | [ How To Do ] (Screenshot 4 Style)
         val toggleRow = LinearLayout(this).apply {
@@ -2281,8 +2379,9 @@ class MainActivity : AppCompatActivity() {
                     setTypeface(null, Typeface.BOLD)
                     setPadding(0, 0, 0, 12)
                 })
-                dynamicDetailBox.addView(MuscleBodyMapView(this, ex.muscle).apply {
-                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 300)
+                dynamicDetailBox.addView(AnatomyMapView(this, ex.muscle, null,
+                    "Highlighted: ${ex.muscle}").apply {
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 320)
                 })
                 dynamicDetailBox.addView(TextView(this).apply {
                     text = "🏋️ Equipment Required: ${ex.equipment}"
@@ -3164,200 +3263,6 @@ class MainActivity : AppCompatActivity() {
             params.setMargins(6, 0, 6, 0)
             layoutParams = params
             setOnClickListener { onClick() }
-        }
-    }
-
-    // Interactive Tappable Front & Back Anatomical Muscle Map (Screenshots 2, 3, 4 Style)
-    class MuscleBodyMapView(
-        context: Context,
-        private val activeMuscle: String,
-        private val onMuscleTapped: ((String) -> Unit)? = null
-    ) : View(context) {
-        private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#334155") }
-        private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#EF4444") }
-        private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#B91C1C") }
-        private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#E2E8F0")
-            textSize = 24f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
-        }
-        private val tagTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = 21f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
-        }
-
-        private fun paintFor(vararg groups: String): Paint {
-            if (activeMuscle == "All") return highlightPaint
-            return if (groups.any { it.equals(activeMuscle, true) }) highlightPaint else basePaint
-        }
-
-        override fun onTouchEvent(event: MotionEvent): Boolean {
-            if (event.action == MotionEvent.ACTION_DOWN && onMuscleTapped != null) {
-                val x = event.x
-                val y = event.y
-                val w = width.toFloat()
-                val tapped = if (x < w * 0.5f) {
-                    when {
-                        y < 125f -> "Shoulders"
-                        y < 158f && x > w * 0.18f && x < w * 0.38f -> "Chest"
-                        y < 210f && (x <= w * 0.18f || x >= w * 0.38f) -> "Arms"
-                        y < 215f -> "Abs"
-                        else -> "Legs"
-                    }
-                } else {
-                    when {
-                        y < 188f -> "Back"
-                        y < 220f -> "Core"
-                        else -> "Legs"
-                    }
-                }
-                onMuscleTapped.invoke(tapped)
-                return true
-            }
-            return super.onTouchEvent(event)
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val w = width.toFloat()
-            val frontCx = w * 0.28f
-            val backCx = w * 0.72f
-
-            canvas.drawText("FRONT (TAP MUSCLE)", frontCx, 28f, labelPaint)
-            canvas.drawText("BACK (TAP MUSCLE)", backCx, 28f, labelPaint)
-
-            // Front Figure
-            canvas.drawCircle(frontCx, 68f, 20f, basePaint)
-            canvas.drawRoundRect(frontCx - 48f, 96f, frontCx + 48f, 122f, 12f, 12f, paintFor("Shoulders"))
-            canvas.drawRoundRect(frontCx - 34f, 106f, frontCx + 34f, 150f, 10f, 10f, paintFor("Chest"))
-            canvas.drawRoundRect(frontCx - 26f, 154f, frontCx + 26f, 210f, 8f, 8f, paintFor("Abs", "Core"))
-            canvas.drawRoundRect(frontCx - 56f, 124f, frontCx - 38f, 196f, 10f, 10f, paintFor("Arms"))
-            canvas.drawRoundRect(frontCx + 38f, 124f, frontCx + 56f, 196f, 10f, 10f, paintFor("Arms"))
-            canvas.drawRoundRect(frontCx - 30f, 216f, frontCx - 8f, 304f, 10f, 10f, paintFor("Legs"))
-            canvas.drawRoundRect(frontCx + 8f, 216f, frontCx + 30f, 304f, 10f, 10f, paintFor("Legs"))
-
-            // Back Figure
-            canvas.drawCircle(backCx, 68f, 20f, basePaint)
-            canvas.drawRoundRect(backCx - 48f, 96f, backCx + 48f, 122f, 12f, 12f, paintFor("Shoulders"))
-            canvas.drawRoundRect(backCx - 36f, 110f, backCx + 36f, 184f, 12f, 12f, paintFor("Back"))
-            canvas.drawRoundRect(backCx - 28f, 188f, backCx + 28f, 216f, 10f, 10f, paintFor("Core", "Legs"))
-            canvas.drawRoundRect(backCx - 56f, 124f, backCx - 38f, 196f, 10f, 10f, paintFor("Arms"))
-            canvas.drawRoundRect(backCx + 38f, 124f, backCx + 56f, 196f, 10f, 10f, paintFor("Arms"))
-            canvas.drawRoundRect(backCx - 30f, 220f, backCx - 8f, 304f, 10f, 10f, paintFor("Legs"))
-            canvas.drawRoundRect(backCx + 8f, 220f, backCx + 30f, 304f, 10f, 10f, paintFor("Legs"))
-
-            // Red Callout Pills (Screenshot 2 Style: Arm, Abs, Back, Leg)
-            canvas.drawRoundRect(16f, 132f, 104f, 166f, 18f, 18f, badgePaint)
-            canvas.drawText("Arm", 60f, 156f, tagTextPaint)
-
-            canvas.drawRoundRect(16f, 178f, 104f, 212f, 18f, 18f, badgePaint)
-            canvas.drawText("Abs", 60f, 202f, tagTextPaint)
-
-            canvas.drawRoundRect(w - 108f, 122f, w - 16f, 156f, 18f, 18f, badgePaint)
-            canvas.drawText("Back", w - 62f, 146f, tagTextPaint)
-
-            canvas.drawRoundRect(w - 108f, 240f, w - 16f, 274f, 18f, 18f, badgePaint)
-            canvas.drawText("Leg", w - 62f, 264f, tagTextPaint)
-        }
-    }
-
-    // Live Animated Exercise Visual Player (Demonstrates Rep Mechanics in Real Time)
-    class ExerciseAnimView(context: Context, private val animType: Int) : View(context) {
-        private var phase = 0f
-        private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#162238") }
-        private val bonePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#E2E8F0")
-            strokeWidth = 10f
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-        }
-        private val muscleGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#EF4444")
-            strokeWidth = 14f
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-        }
-        private val equipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#38BDF8")
-            strokeWidth = 8f
-            style = Paint.Style.FILL_AND_STROKE
-        }
-        private val animator = ValueAnimator.ofFloat(0f, 6.283f).apply {
-            duration = 1600L
-            repeatCount = ValueAnimator.INFINITE
-            interpolator = LinearInterpolator()
-            addUpdateListener {
-                phase = (sin((it.animatedValue as Float).toDouble()).toFloat() + 1f) / 2f
-                invalidate()
-            }
-        }
-
-        override fun onAttachedToWindow() {
-            super.onAttachedToWindow()
-            animator.start()
-        }
-
-        override fun onDetachedFromWindow() {
-            super.onDetachedFromWindow()
-            animator.cancel()
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val w = width.toFloat()
-            val h = height.toFloat()
-            canvas.drawRoundRect(0f, 0f, w, h, 24f, 24f, bgPaint)
-
-            val cx = w / 2f
-            val cy = h / 2f
-
-            when (animType) {
-                0 -> {
-                    val yShift = phase * 22f
-                    canvas.drawCircle(cx - 42f, cy - 10f + yShift, 12f, bonePaint)
-                    canvas.drawLine(cx - 30f, cy - 6f + yShift, cx + 40f, cy + 25f, muscleGlowPaint)
-                    canvas.drawLine(cx - 18f, cy + yShift, cx - 18f, cy + 32f, bonePaint)
-                }
-                1 -> {
-                    val pullY = cy + 25f - phase * 26f
-                    canvas.drawCircle(cx - 25f, cy - 32f, 12f, bonePaint)
-                    canvas.drawLine(cx - 18f, cy - 22f, cx + 18f, cy + 5f, muscleGlowPaint)
-                    canvas.drawLine(cx + 18f, cy + 5f, cx + 10f, cy + 45f, bonePaint)
-                    canvas.drawLine(cx - 10f, cy - 15f, cx - 12f, pullY, bonePaint)
-                    canvas.drawCircle(cx - 12f, pullY, 12f, equipPaint)
-                }
-                2 -> {
-                    val handY = cy + 22f - phase * 38f
-                    canvas.drawCircle(cx, cy - 42f, 12f, bonePaint)
-                    canvas.drawLine(cx, cy - 28f, cx, cy + 35f, bonePaint)
-                    canvas.drawLine(cx, cy - 22f, cx + 22f, handY, muscleGlowPaint)
-                    canvas.drawCircle(cx + 24f, handY, 9f, equipPaint)
-                }
-                3 -> {
-                    val hipDrop = phase * 26f
-                    canvas.drawCircle(cx, cy - 42f + hipDrop, 12f, bonePaint)
-                    canvas.drawLine(cx, cy - 28f + hipDrop, cx - 8f, cy + 4f + hipDrop, bonePaint)
-                    canvas.drawLine(cx - 8f, cy + 4f + hipDrop, cx + 16f, cy + 22f, muscleGlowPaint)
-                    canvas.drawLine(cx + 16f, cy + 22f, cx + 4f, cy + 48f, bonePaint)
-                }
-                4 -> {
-                    val barY = cy - 15f - phase * 32f
-                    canvas.drawCircle(cx, cy - 8f, 12f, bonePaint)
-                    canvas.drawLine(cx, cy + 6f, cx, cy + 45f, muscleGlowPaint)
-                    canvas.drawLine(cx - 28f, barY, cx + 28f, barY, equipPaint)
-                    canvas.drawLine(cx - 16f, cy + 8f, cx - 22f, barY, bonePaint)
-                    canvas.drawLine(cx + 16f, cy + 8f, cx + 22f, barY, bonePaint)
-                }
-                else -> {
-                    val reachX = cx - 10f - phase * 28f
-                    canvas.drawCircle(reachX, cy - 8f, 11f, bonePaint)
-                    canvas.drawLine(reachX + 8f, cy, cx + 28f, cy + 18f, muscleGlowPaint)
-                    canvas.drawCircle(reachX - 6f, cy + 22f, 10f, equipPaint)
-                }
-            }
         }
     }
 
