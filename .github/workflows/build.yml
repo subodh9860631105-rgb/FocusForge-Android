@@ -31,6 +31,12 @@ jobs:
           f3=$(find . -name "MainActivity.kt" | head -n 1)
           if [ -n "$f3" ] && [ "$f3" != "./app/src/main/java/com/focusforge/pro/MainActivity.kt" ]; then cp "$f3" app/src/main/java/com/focusforge/pro/MainActivity.kt; fi
 
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.enableJetifier=true
+          EOF
+
           cat << 'EOF' > settings.gradle
           pluginManagement {
               repositories {
