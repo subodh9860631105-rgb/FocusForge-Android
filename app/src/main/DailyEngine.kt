@@ -219,12 +219,14 @@ object RevisionPlanner {
         return fmt.format(cal.time)
     }
 
-    fun daysUntil(dateStr: String): Int = try {
-        val target = fmt.parse(dateStr) ?: return Int.MAX_VALUE
-        val today = fmt.parse(fmt.format(Date())) ?: return Int.MAX_VALUE
-        ((target.time - today.time) / 86_400_000L).toInt()
-    } catch (e: Exception) {
-        Int.MAX_VALUE
+    fun daysUntil(dateStr: String): Int {
+        return try {
+            val target = fmt.parse(dateStr) ?: return Int.MAX_VALUE
+            val today = fmt.parse(fmt.format(Date())) ?: return Int.MAX_VALUE
+            ((target.time - today.time) / 86_400_000L).toInt()
+        } catch (e: Exception) {
+            Int.MAX_VALUE
+        }
     }
 
     /** Marks a unit due for its first revision, or clears it when un-completed. */
