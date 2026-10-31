@@ -330,7 +330,6 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 0, 0, 22)
         }
 
-        // Fine-tune +/- and Custom Hour/Min Picker Row
         val fineTuneRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -340,7 +339,6 @@ class MainActivity : AppCompatActivity() {
         fineTuneRow.addView(createPillButton("⏱️ Set Custom H:M") { showCustomTimerDialog() })
         fineTuneRow.addView(createPillButton("+ 5m") { adjustTimerByMinutes(5) })
 
-        // Quick Presets Row
         val presetRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -472,7 +470,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 14f
         }
         val inputHours = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
+            setRawInputType(InputType.TYPE_CLASS_NUMBER)
             setText(currentHrs.toString())
             hint = "Hours (e.g. 1)"
         }
@@ -484,7 +482,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 24, 0, 0)
         }
         val inputMinutes = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
+            setRawInputType(InputType.TYPE_CLASS_NUMBER)
             setText(currentMins.toString())
             hint = "Minutes (e.g. 45)"
         }
@@ -516,14 +514,13 @@ class MainActivity : AppCompatActivity() {
         topHeaderCard.addView(createSectionLabel("CA (FOUNDATION • INTER • FINAL) & B.COM SYLLABUS"))
 
         val tvDesc = TextView(this).apply {
-            text = "Organize Subjects, Modules & Units with bold clarity. Tap status to cycle (⬜ Todo → ⏳ In Progress → ✅ Revised) or use ✏️ Edit and ✕ Remove."
+            text = "Organize Subjects, Modules & Units with bold clarity. Tap status to cycle (⬜ Todo → ⏳ Studying → ✅ Done) or use ✏️ Edit and ✕ Remove."
             setTextColor(Color.parseColor("#CBD5E1"))
             textSize = 13f
             setLineSpacing(6f, 1.1f)
             setPadding(0, 6, 0, 20)
         }
 
-        // Course Level Filter Scroll
         val filterScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             setPadding(0, 0, 0, 20)
@@ -619,7 +616,6 @@ class MainActivity : AppCompatActivity() {
             val courseLevel = subjObj.optString("level", "CA Foundation")
             val unitsArray = subjObj.getJSONArray("units")
 
-            // Populate Subject Chip in Focus Timer
             val chipBtn = Button(this).apply {
                 text = subjName
                 isAllCaps = false
@@ -651,7 +647,6 @@ class MainActivity : AppCompatActivity() {
                 continue
             }
 
-            // Spacious Glass Subject Card
             val card = createGlassCard("#10192D", "#243B61")
             var completedUnits = 0
             for (u in 0 until unitsArray.length()) {
@@ -661,7 +656,6 @@ class MainActivity : AppCompatActivity() {
             val pct = if (totalUnits > 0) (completedUnits * 100) / totalUnits else 0
             val studiedMins = prefs.getInt("subj_$subjName", 0)
 
-            // Course Badge + Subject Actions Row
             val badgeRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -741,7 +735,6 @@ class MainActivity : AppCompatActivity() {
             card.addView(tvMetaRow)
             card.addView(pb)
 
-            // Render Spacious Modules / Units / Lessons
             for (u in 0 until unitsArray.length()) {
                 val unitObj = unitsArray.getJSONObject(u)
                 val moduleTag = unitObj.optString("module", "Module ${u + 1}")
@@ -1102,7 +1095,7 @@ class MainActivity : AppCompatActivity() {
         unitsList.forEachIndexed { idx, item ->
             val parts = item.split("•")
             val mod = if (parts.size > 1) parts[0].trim() else "Module ${idx + 1}"
-            val title = if (parts.size > 1) parts[1].trim() else item
+            val title = if (parts.size > 1) parts.drop(1).joinToString(" • ").trim() else item
             unitsArr.put(JSONObject().put("module", mod).put("title", title).put("status", 0))
         }
         return JSONObject().put("name", name).put("level", level).put("units", unitsArr)
@@ -1138,7 +1131,6 @@ class MainActivity : AppCompatActivity() {
         val weeklyPct = (totalChecks * 100) / (totalHabits * 7)
         val dayPercentages = dayTotals.map { (it * 100) / totalHabits }.toIntArray()
 
-        // 1. Streako "Trust the Process" Card
         val bannerCard = createGlassCard("#10192D", "#10B981")
         val tvTrust = TextView(this).apply {
             text = "trust the process."
@@ -1174,7 +1166,6 @@ class MainActivity : AppCompatActivity() {
         bannerCard.addView(tvWeeklySummary)
         consistencyContentContainer.addView(bannerCard)
 
-        // 2. Editable 7-Day Habit & Consistency Matrix
         val matrixCard = createGlassCard("#10192D", "#2A4365")
         matrixCard.addView(createSectionLabel("7-DAY HABIT MATRIX (TAP ⚙️ TO EDIT OR DELETE HABIT)"))
 
@@ -1283,7 +1274,6 @@ class MainActivity : AppCompatActivity() {
         matrixCard.addView(habitActionRow)
         consistencyContentContainer.addView(matrixCard)
 
-        // 3. Feature-Loaded Workout & Physical Training Tracker (With Undo/Delete Log)
         val workoutCard = createGlassCard("#10192D", "#F59E0B")
         workoutCard.addView(createSectionLabel("🏋️ WORKOUT & PHYSICAL TRAINING TRACKER"))
 
@@ -1332,7 +1322,6 @@ class MainActivity : AppCompatActivity() {
         workoutCard.addView(workoutQuickRow)
         workoutCard.addView(btnCustomWorkout)
 
-        // Workout History Log with ✕ Undo / Cancel Buttons
         val workoutLogs = JSONArray(prefs.getString("workout_logs_json", "[]"))
         if (workoutLogs.length() > 0) {
             val tvHistoryHeader = TextView(this).apply {
@@ -1435,7 +1424,7 @@ class MainActivity : AppCompatActivity() {
         }
         val inputMins = EditText(this).apply {
             hint = "Duration in Minutes (e.g., 60)"
-            inputType = InputType.TYPE_CLASS_NUMBER
+            setRawInputType(InputType.TYPE_CLASS_NUMBER)
             setText("45")
         }
         val inputNotes = EditText(this).apply {
@@ -1461,7 +1450,7 @@ class MainActivity : AppCompatActivity() {
     private fun showAddHabitDialog() {
         val input = EditText(this).apply {
             hint = "e.g., Solve 10 Practical Accounts Questions / 8 Hrs Sleep"
-            inputType = InputType.TYPE_CLASS_TEXT
+            setRawInputType(InputType.TYPE_CLASS_TEXT)
             setPadding(56, 40, 56, 40)
         }
         AlertDialog.Builder(this)
@@ -1872,9 +1861,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ====================================================
-    // GLASSMORPHISM UI HELPERS & CUSTOM CANVAS VIEWS
-    // ====================================================
     private fun createSectionLabel(title: String): TextView {
         return TextView(this).apply {
             text = title
