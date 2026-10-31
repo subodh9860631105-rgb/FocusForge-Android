@@ -164,7 +164,6 @@ class MainActivity : AppCompatActivity() {
             setPadding(34, 48, 34, 48)
         }
 
-        // TOP GLASS HEADER
         val headerCard = createGlassCard("#10192D", "#2A4365")
         val titleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -235,7 +234,6 @@ class MainActivity : AppCompatActivity() {
         headerCard.addView(tvAccessibilityBanner)
         rootContent.addView(headerCard)
 
-        // 5 TAB CONTAINERS
         tabFocusContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         tabSyllabusContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         tabConsistencyContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -257,7 +255,6 @@ class MainActivity : AppCompatActivity() {
         scrollView.addView(rootContent)
         mainScreen.addView(scrollView)
 
-        // BOTTOM 5-TAB NAVIGATION BAR
         val bottomNav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             background = createGlassDrawable("#0D1526", "#1E293B", 0f)
@@ -285,13 +282,38 @@ class MainActivity : AppCompatActivity() {
         mainScreen.addView(bottomNav)
         setContentView(mainScreen)
 
+        restoreRunningTimerIfNeeded()
         switchTab(0)
         refreshAllUI()
     }
 
     override fun onResume() {
         super.onResume()
+        restoreRunningTimerIfNeeded()
         refreshAllUI()
+    }
+
+    private fun restoreRunningTimerIfNeeded() {
+        val wasRunning = prefs.getBoolean("timer_is_active", false)
+        val endTime = prefs.getLong("timer_end_millis", 0L)
+        if (wasRunning && endTime > 0L) {
+            val remaining = endTime - System.currentTimeMillis()
+            if (remaining > 1000L) {
+                timeLeftInMillis = remaining
+                if (!isTimerRunning) {
+                    startTimer(resumeExisting = true)
+                }
+            } else {
+                prefs.edit().putBoolean("timer_is_active", false).putLong("timer_end_millis", 0L).apply()
+                isTimerRunning = false
+                timeLeftInMillis = initialTimeMillis
+                tvTimerDisplay.text = formatTime(initialTimeMillis)
+                tvTimerStatus.text = "Session Complete! Great work!"
+                btnStartPause.text = "Start Focus"
+                playCompletionSound()
+                recordCompletedSession()
+            }
+        }
     }
 
     private fun switchTab(index: Int) {
@@ -420,7 +442,12 @@ class MainActivity : AppCompatActivity() {
             textSize = 12.5f
             isChecked = prefs.getBoolean("strict_lock_mode", true)
             setPadding(10, 10, 10, 16)
-            setOnCheckedChangeListener { _, checked ->
+            setOnCheckedChangeListener { buttonView, checked ->
+                if (isTimerRunning && !checked) {
+                    buttonView.isChecked = true
+                    Toast.makeText(this@MainActivity, "🔒 Cannot disable Strict Mode while timer is running!", Toast.LENGTH_SHORT).show()
+                    return@setOnCheckedChangeListener
+                }
                 prefs.edit().putBoolean("strict_lock_mode", checked).apply()
             }
         }
@@ -431,12 +458,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnStartPause = createActionButton("Start Focus", "#4F46E5", "#818CF8") {
-            if (isTimerRunning) pauseTimer() else startTimer()
+            if (isTimerRunning) {
+                if (cbStrictLock.isChecked) {
+                    Toast.makeText(this, "🔒 Strict Mode is ON! Complete the session without pausing.", Toast.LENGTH_SHORT).show()
+                } else {
+                    pauseTimer()
+                }
+            } else {
+                startTimer(resumeExisting = false)
+            }
         }
 
         val btnReset = createActionButton("Reset", "#1E293B", "#334155") {
             if (isTimerRunning && cbStrictLock.isChecked) {
-                Toast.makeText(this, "🔒 Strict Mode active! Pause first or finish session.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "🔒 Strict Mode active! Finish your study session first.", Toast.LENGTH_SHORT).show()
             } else {
                 resetTimer()
             }
@@ -504,11 +539,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun adjustTimerByMinutes(deltaMinutes: Int) {
         if (isTimerRunning && cbStrictLock.isChecked) {
-            Toast.makeText(this, "🔒 Pause or finish current session first.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "🔒 Finish current session first.", Toast.LENGTH_SHORT).show()
             return
         }
         countDownTimer?.cancel()
         isTimerRunning = false
+        prefs.edit().putBoolean("timer_is_active", false).apply()
         val newMillis = (initialTimeMillis + deltaMinutes * 60 * 1000L).coerceIn(60 * 1000L, 12 * 3600 * 1000L)
         initialTimeMillis = newMillis
         timeLeftInMillis = newMillis
@@ -520,7 +556,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showCustomTimerDialog() {
         if (isTimerRunning && cbStrictLock.isChecked) {
-            Toast.makeText(this, "🔒 Strict Mode Active! Pause or finish session first.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "🔒 Strict Mode Active! Finish session first.", Toast.LENGTH_SHORT).show()
             return
         }
         val layout = LinearLayout(this).apply {
@@ -1148,7 +1184,6 @@ class MainActivity : AppCompatActivity() {
         val workoutMins = prefs.getInt("workout_minutes", 0)
         val totalVolumeKg = calculateTotalVolumeKg()
 
-        // 1. FITNESS TRACKER SMART REPORT + ANATOMICAL MUSCLE BODY MAP
         val reportCard = createGlassCard("#10192D", "#EF4444")
         reportCard.addView(createSectionLabel("FITNESS TRACKER SMART • VOLUME & FOCUS AREA MAP"))
 
@@ -1171,7 +1206,6 @@ class MainActivity : AppCompatActivity() {
         reportCard.addView(bodyMapView)
         workoutContentContainer.addView(reportCard)
 
-        // 2. WORKOUT.COOL SMART FILTER: STEP 1 EQUIPMENT & STEP 2 MUSCLE FOCUS
         val filterCard = createGlassCard("#10192D", "#2A4365")
         filterCard.addView(createSectionLabel("STEP 1: SELECT EQUIPMENT (WORKOUT.COOL GENERATOR)"))
 
@@ -1235,7 +1269,6 @@ class MainActivity : AppCompatActivity() {
         filterCard.addView(muscleScroll)
         workoutContentContainer.addView(filterCard)
 
-        // 3. EXERCISE CARDS WITH ANIMATED VISUAL DEMO & FLEXIBLE WEIGHTLIFTING SET LOGGER
         val setsStateObj = JSONObject(prefs.getString("workout_sets_json", "{}"))
         val filteredExercises = exerciseCatalog.filter { ex ->
             (selectedMuscleFilter == "All" || ex.muscle.equals(selectedMuscleFilter, true) || ex.secondaryMuscles.contains(selectedMuscleFilter, true)) &&
@@ -1250,7 +1283,6 @@ class MainActivity : AppCompatActivity() {
                 setPadding(0, 0, 0, 14)
             }
 
-            // Live Animated Visual Demonstration Thumbnail
             val animThumb = ExerciseAnimView(this, ex.animType).apply {
                 layoutParams = LinearLayout.LayoutParams(150, 150).apply { setMargins(0, 0, 20, 0) }
                 setOnClickListener { showExerciseVideoGuideDialog(ex) }
@@ -1308,7 +1340,6 @@ class MainActivity : AppCompatActivity() {
             topRow.addView(btnVideoGuide)
             exCard.addView(topRow)
 
-            // Weightlifting Set Rows (Screenshot 7 Style: ✓ | Set # | 20 kg | 12 Reps)
             for (s in 0 until exSetsArr.length()) {
                 val setObj = exSetsArr.getJSONObject(s)
                 val kg = setObj.optInt("kg", 20)
@@ -1412,7 +1443,6 @@ class MainActivity : AppCompatActivity() {
         }
         prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
 
-        // 4. CUSTOM WORKOUT LOGGER & UNDOABLE WORKOUT HISTORY
         val historyCard = createGlassCard("#10192D", "#F59E0B")
         historyCard.addView(createSectionLabel("WORKOUT SESSION LOGGER & UNDO HISTORY"))
 
@@ -1624,7 +1654,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ====================================================
-    // TAB 5: SMART APP & YOUTUBE SHORTS SHIELD
+    // TAB 5: SMART APP & YOUTUBE SHORTS SHIELD (STRICT LOCKED)
     // ====================================================
     private fun buildShieldTab() {
         val shieldCard = createGlassCard("#10192D", "#2A4365")
@@ -1662,7 +1692,14 @@ class MainActivity : AppCompatActivity() {
                 textSize = 13.5f
                 isChecked = prefs.getBoolean(key, defaultVal)
                 setPadding(12, 12, 12, 12)
-                setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean(key, checked).apply() }
+                setOnCheckedChangeListener { buttonView, checked ->
+                    if (!checked && isTimerRunning && cbStrictLock.isChecked) {
+                        buttonView.isChecked = true
+                        Toast.makeText(this@MainActivity, "🔒 Strict Lock Active! Cannot weaken Shield rules while timer runs.", Toast.LENGTH_SHORT).show()
+                        return@setOnCheckedChangeListener
+                    }
+                    prefs.edit().putBoolean(key, checked).apply()
+                }
             })
         }
 
@@ -1851,6 +1888,7 @@ class MainActivity : AppCompatActivity() {
         }
         countDownTimer?.cancel()
         isTimerRunning = false
+        prefs.edit().putBoolean("timer_is_active", false).apply()
         initialTimeMillis = durationMillis
         timeLeftInMillis = durationMillis
         tvTimerDisplay.text = formatTime(timeLeftInMillis)
@@ -1858,10 +1896,18 @@ class MainActivity : AppCompatActivity() {
         btnStartPause.text = "Start Focus"
     }
 
-    private fun startTimer() {
+    private fun startTimer(resumeExisting: Boolean) {
         prefs.edit().putBoolean("blocker_enabled", true).apply()
         updateBlockerButtonStyle(btnBlockerToggle, true)
 
+        if (!resumeExisting) {
+            prefs.edit()
+                .putBoolean("timer_is_active", true)
+                .putLong("timer_end_millis", System.currentTimeMillis() + timeLeftInMillis)
+                .apply()
+        }
+
+        countDownTimer?.cancel()
         countDownTimer = object : CountDownTimer(timeLeftInMillis, 1000) {
             override fun onTick(millisUntilFinished: Long) {
                 timeLeftInMillis = millisUntilFinished
@@ -1870,6 +1916,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onFinish() {
                 isTimerRunning = false
+                prefs.edit().putBoolean("timer_is_active", false).putLong("timer_end_millis", 0L).apply()
                 timeLeftInMillis = initialTimeMillis
                 tvTimerDisplay.text = formatTime(initialTimeMillis)
                 tvTimerStatus.text = "Session Complete! Great work!"
@@ -1880,7 +1927,7 @@ class MainActivity : AppCompatActivity() {
         }.start()
 
         isTimerRunning = true
-        tvTimerStatus.text = "🔥 Focusing on $selectedSubject — Shield Locked"
+        tvTimerStatus.text = "🔥 Focusing on $selectedSubject — Strict Shield Locked"
         btnStartPause.text = "Pause"
     }
 
@@ -1894,6 +1941,7 @@ class MainActivity : AppCompatActivity() {
     private fun pauseTimer() {
         countDownTimer?.cancel()
         isTimerRunning = false
+        prefs.edit().putBoolean("timer_is_active", false).apply()
         tvTimerStatus.text = "Paused • $selectedSubject"
         btnStartPause.text = "Resume"
     }
@@ -1901,6 +1949,7 @@ class MainActivity : AppCompatActivity() {
     private fun resetTimer() {
         countDownTimer?.cancel()
         isTimerRunning = false
+        prefs.edit().putBoolean("timer_is_active", false).putLong("timer_end_millis", 0L).apply()
         timeLeftInMillis = initialTimeMillis
         tvTimerDisplay.text = formatTime(timeLeftInMillis)
         tvTimerStatus.text = "Ready • $selectedSubject"
@@ -2038,7 +2087,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Custom Anatomical Front & Back Muscle Highlight View (Screenshot 2 & 3 Style)
     class MuscleBodyMapView(context: Context, private val activeMuscle: String) : View(context) {
         private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#334155") }
         private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#EF4444") }
@@ -2057,36 +2105,32 @@ class MainActivity : AppCompatActivity() {
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val w = width.toFloat()
-            val h = height.toFloat()
             val frontCx = w * 0.28f
             val backCx = w * 0.72f
 
             canvas.drawText("FRONT MUSCLE MAP", frontCx, 30f, labelPaint)
             canvas.drawText("BACK MUSCLE MAP", backCx, 30f, labelPaint)
 
-            // Front Figure
-            canvas.drawCircle(frontCx, 72f, 22f, basePaint) // Head
-            canvas.drawRoundRect(frontCx - 48f, 100f, frontCx + 48f, 125f, 12f, 12f, paintFor("Shoulders")) // Shoulders
-            canvas.drawRoundRect(frontCx - 34f, 108f, frontCx + 34f, 152f, 10f, 10f, paintFor("Chest")) // Chest
-            canvas.drawRoundRect(frontCx - 26f, 156f, frontCx + 26f, 212f, 8f, 8f, paintFor("Abs", "Core")) // Abs
-            canvas.drawRoundRect(frontCx - 56f, 126f, frontCx - 38f, 198f, 10f, 10f, paintFor("Arms")) // L Arm
-            canvas.drawRoundRect(frontCx + 38f, 126f, frontCx + 56f, 198f, 10f, 10f, paintFor("Arms")) // R Arm
-            canvas.drawRoundRect(frontCx - 30f, 218f, frontCx - 8f, 308f, 10f, 10f, paintFor("Legs")) // L Leg
-            canvas.drawRoundRect(frontCx + 8f, 218f, frontCx + 30f, 308f, 10f, 10f, paintFor("Legs")) // R Leg
+            canvas.drawCircle(frontCx, 72f, 22f, basePaint)
+            canvas.drawRoundRect(frontCx - 48f, 100f, frontCx + 48f, 125f, 12f, 12f, paintFor("Shoulders"))
+            canvas.drawRoundRect(frontCx - 34f, 108f, frontCx + 34f, 152f, 10f, 10f, paintFor("Chest"))
+            canvas.drawRoundRect(frontCx - 26f, 156f, frontCx + 26f, 212f, 8f, 8f, paintFor("Abs", "Core"))
+            canvas.drawRoundRect(frontCx - 56f, 126f, frontCx - 38f, 198f, 10f, 10f, paintFor("Arms"))
+            canvas.drawRoundRect(frontCx + 38f, 126f, frontCx + 56f, 198f, 10f, 10f, paintFor("Arms"))
+            canvas.drawRoundRect(frontCx - 30f, 218f, frontCx - 8f, 308f, 10f, 10f, paintFor("Legs"))
+            canvas.drawRoundRect(frontCx + 8f, 218f, frontCx + 30f, 308f, 10f, 10f, paintFor("Legs"))
 
-            // Back Figure
-            canvas.drawCircle(backCx, 72f, 22f, basePaint) // Head
-            canvas.drawRoundRect(backCx - 48f, 100f, backCx + 48f, 125f, 12f, 12f, paintFor("Shoulders")) // Rear Delts
-            canvas.drawRoundRect(backCx - 36f, 112f, backCx + 36f, 185f, 12f, 12f, paintFor("Back")) // Lats / Back
-            canvas.drawRoundRect(backCx - 28f, 188f, backCx + 28f, 218f, 10f, 10f, paintFor("Core", "Legs")) // Lower Back / Glutes
-            canvas.drawRoundRect(backCx - 56f, 126f, backCx - 38f, 198f, 10f, 10f, paintFor("Arms")) // L Tricep
-            canvas.drawRoundRect(backCx + 38f, 126f, backCx + 56f, 198f, 10f, 10f, paintFor("Arms")) // R Tricep
-            canvas.drawRoundRect(backCx - 30f, 222f, backCx - 8f, 308f, 10f, 10f, paintFor("Legs")) // L Hamstring
-            canvas.drawRoundRect(backCx + 8f, 222f, backCx + 30f, 308f, 10f, 10f, paintFor("Legs")) // R Hamstring
+            canvas.drawCircle(backCx, 72f, 22f, basePaint)
+            canvas.drawRoundRect(backCx - 48f, 100f, backCx + 48f, 125f, 12f, 12f, paintFor("Shoulders"))
+            canvas.drawRoundRect(backCx - 36f, 112f, backCx + 36f, 185f, 12f, 12f, paintFor("Back"))
+            canvas.drawRoundRect(backCx - 28f, 188f, backCx + 28f, 218f, 10f, 10f, paintFor("Core", "Legs"))
+            canvas.drawRoundRect(backCx - 56f, 126f, backCx - 38f, 198f, 10f, 10f, paintFor("Arms"))
+            canvas.drawRoundRect(backCx + 38f, 126f, backCx + 56f, 198f, 10f, 10f, paintFor("Arms"))
+            canvas.drawRoundRect(backCx - 30f, 222f, backCx - 8f, 308f, 10f, 10f, paintFor("Legs"))
+            canvas.drawRoundRect(backCx + 8f, 222f, backCx + 30f, 308f, 10f, 10f, paintFor("Legs"))
         }
     }
 
-    // Live Animated Exercise Visual Player (Demonstrates Rep Mechanics in Real Time)
     class ExerciseAnimView(context: Context, private val animType: Int) : View(context) {
         private var phase = 0f
         private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#162238") }
@@ -2137,35 +2181,35 @@ class MainActivity : AppCompatActivity() {
             val cy = h / 2f
 
             when (animType) {
-                0 -> { // Push-up / Bench Press motion
+                0 -> {
                     val yShift = phase * 22f
-                    canvas.drawCircle(cx - 42f, cy - 10f + yShift, 12f, bonePaint) // Head
-                    canvas.drawLine(cx - 30f, cy - 6f + yShift, cx + 40f, cy + 25f, muscleGlowPaint) // Torso
-                    canvas.drawLine(cx - 18f, cy + yShift, cx - 18f, cy + 32f, bonePaint) // Arms pressing
+                    canvas.drawCircle(cx - 42f, cy - 10f + yShift, 12f, bonePaint)
+                    canvas.drawLine(cx - 30f, cy - 6f + yShift, cx + 40f, cy + 25f, muscleGlowPaint)
+                    canvas.drawLine(cx - 18f, cy + yShift, cx - 18f, cy + 32f, bonePaint)
                 }
-                1 -> { // Bent-Over Row motion
+                1 -> {
                     val pullY = cy + 25f - phase * 26f
                     canvas.drawCircle(cx - 25f, cy - 32f, 12f, bonePaint)
-                    canvas.drawLine(cx - 18f, cy - 22f, cx + 18f, cy + 5f, muscleGlowPaint) // Back
-                    canvas.drawLine(cx + 18f, cy + 5f, cx + 10f, cy + 45f, bonePaint) // Legs
-                    canvas.drawLine(cx - 10f, cy - 15f, cx - 12f, pullY, bonePaint) // Pulling Arm
-                    canvas.drawCircle(cx - 12f, pullY, 12f, equipPaint) // Barbell plate
+                    canvas.drawLine(cx - 18f, cy - 22f, cx + 18f, cy + 5f, muscleGlowPaint)
+                    canvas.drawLine(cx + 18f, cy + 5f, cx + 10f, cy + 45f, bonePaint)
+                    canvas.drawLine(cx - 10f, cy - 15f, cx - 12f, pullY, bonePaint)
+                    canvas.drawCircle(cx - 12f, pullY, 12f, equipPaint)
                 }
-                2 -> { // Bicep Curl motion
+                2 -> {
                     val handY = cy + 22f - phase * 38f
                     canvas.drawCircle(cx, cy - 42f, 12f, bonePaint)
                     canvas.drawLine(cx, cy - 28f, cx, cy + 35f, bonePaint)
                     canvas.drawLine(cx, cy - 22f, cx + 22f, handY, muscleGlowPaint)
                     canvas.drawCircle(cx + 24f, handY, 9f, equipPaint)
                 }
-                3 -> { // Squat / Lunge motion
+                3 -> {
                     val hipDrop = phase * 26f
                     canvas.drawCircle(cx, cy - 42f + hipDrop, 12f, bonePaint)
                     canvas.drawLine(cx, cy - 28f + hipDrop, cx - 8f, cy + 4f + hipDrop, bonePaint)
-                    canvas.drawLine(cx - 8f, cy + 4f + hipDrop, cx + 16f, cy + 22f, muscleGlowPaint) // Thigh
-                    canvas.drawLine(cx + 16f, cy + 22f, cx + 4f, cy + 48f, bonePaint) // Calf
+                    canvas.drawLine(cx - 8f, cy + 4f + hipDrop, cx + 16f, cy + 22f, muscleGlowPaint)
+                    canvas.drawLine(cx + 16f, cy + 22f, cx + 4f, cy + 48f, bonePaint)
                 }
-                4 -> { // Overhead Press / Lat Pulldown
+                4 -> {
                     val barY = cy - 15f - phase * 32f
                     canvas.drawCircle(cx, cy - 8f, 12f, bonePaint)
                     canvas.drawLine(cx, cy + 6f, cx, cy + 45f, muscleGlowPaint)
@@ -2173,7 +2217,7 @@ class MainActivity : AppCompatActivity() {
                     canvas.drawLine(cx - 16f, cy + 8f, cx - 22f, barY, bonePaint)
                     canvas.drawLine(cx + 16f, cy + 8f, cx + 22f, barY, bonePaint)
                 }
-                else -> { // Ab Wheel / Core Rollout
+                else -> {
                     val reachX = cx - 10f - phase * 28f
                     canvas.drawCircle(reachX, cy - 8f, 11f, bonePaint)
                     canvas.drawLine(reachX + 8f, cy, cx + 28f, cy + 18f, muscleGlowPaint)
