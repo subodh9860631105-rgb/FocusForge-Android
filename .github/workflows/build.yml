@@ -22,15 +22,43 @@ jobs:
       with:
         packages: platform-tools platforms;android-34 build-tools;34.0.0
 
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: '8.7'
+
     - name: Create Gradle Project Structure
       run: |
         mkdir -p app/src/main/java/com/focusforge/pro
         mkdir -p app/src/main/res/values
+        mkdir -p app/src/main/res/drawable
+
+        if [ -f app/src/main/MainActivity.kt ]; then
+          mv app/src/main/MainActivity.kt app/src/main/java/com/focusforge/pro/MainActivity.kt
+        fi
+
+        cat << 'EOF' > app/src/main/res/drawable/ic_app_logo.xml
+        <vector xmlns:android="http://schemas.android.com/apk/res/android"
+            android:width="108dp"
+            android:height="108dp"
+            android:viewportWidth="108"
+            android:viewportHeight="108">
+            <path
+                android:fillColor="#38BDF8"
+                android:pathData="M0,0h108v108h-108z"/>
+        </vector>
+        EOF
+
+        cat << 'EOF' > gradle.properties
+        org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+        android.useAndroidX=true
+        android.nonTransitiveRClass=true
+        EOF
 
         cat << 'EOF' > app/build.gradle
         plugins {
-            id 'com.android.application'
-            id 'org.jetbrains.kotlin.android'
+            id 'com.android.application' version '8.5.0'
+            id 'org.jetbrains.kotlin.android' version '1.9.24'
         }
         android {
             namespace 'com.focusforge.pro'
@@ -74,11 +102,11 @@ jobs:
         rootProject.name = "FocusForge-Android"
         include ':app'
         EOF
-        
+
         echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --no-daemon
+      run: gradle assembleDebug --no-daemon
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
