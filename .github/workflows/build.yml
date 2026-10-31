@@ -75,8 +75,8 @@ jobs:
                   applicationId "com.focusforge.pro"
                   minSdk 26
                   targetSdk 34
-                  versionCode 2
-                  versionName "2.0-Pro"
+                  versionCode 3
+                  versionName "3.0-Pro"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -95,9 +95,10 @@ jobs:
           cat << 'EOF' > app/src/main/res/xml/accessibility_service_config.xml
           <?xml version="1.0" encoding="utf-8"?>
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled"
+              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled|typeViewClicked|typeViewSelected"
               android:accessibilityFeedbackType="feedbackGeneric"
-              android:notificationTimeout="100"
+              android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagReportViewIds|flagRetrieveInteractiveWindows"
+              android:notificationTimeout="15"
               android:canRetrieveWindowContent="true" />
           EOF
 
