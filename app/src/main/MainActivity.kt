@@ -261,7 +261,6 @@ class MainActivity : AppCompatActivity() {
     // TAB 1: REGAIN-STYLE FOCUS RINGS & DEEP WORK TIMER
     // ====================================================
     private fun buildFocusTab() {
-        // Regain Dual Ring Card
         val ringCard = createGlassCard("#11192C", "#1E3A5F")
         ringCard.addView(createSectionLabel("DAILY FOCUS & CONSISTENCY RINGS"))
 
@@ -293,7 +292,6 @@ class MainActivity : AppCompatActivity() {
         ringCard.addView(tvFocusMetricSummary)
         tabFocusContainer.addView(ringCard)
 
-        // Focus Timer Card
         val timerCard = createGlassCard("#11192C", "#243556")
         timerCard.addView(createSectionLabel("POMODORO & CA DEEP WORK TIMER"))
 
@@ -442,7 +440,6 @@ class MainActivity : AppCompatActivity() {
             val subjName = subjObj.getString("name")
             val unitsArray = subjObj.getJSONArray("units")
 
-            // Populate Subject Chip in Focus Timer
             val chipBtn = Button(this).apply {
                 text = subjName
                 isAllCaps = false
@@ -469,7 +466,6 @@ class MainActivity : AppCompatActivity() {
             }
             subjectChipRow.addView(chipBtn)
 
-            // Build Subject Syllabus Card
             val card = createGlassCard("#11192C", "#1E293B")
             var completedUnits = 0
             for (u in 0 until unitsArray.length()) {
@@ -521,11 +517,10 @@ class MainActivity : AppCompatActivity() {
             card.addView(tvTimeLogged)
             card.addView(pb)
 
-            // Render Modules / Units / Lessons
             for (u in 0 until unitsArray.length()) {
                 val unitObj = unitsArray.getJSONObject(u)
                 val unitTitle = unitObj.getString("title")
-                val status = unitObj.getInt("status") // 0 = Todo, 1 = In Progress, 2 = Completed
+                val status = unitObj.getInt("status")
 
                 val (icon, colorHex, bgHex) = when (status) {
                     2 -> Triple("✅", "#6EE7B7", "#064E3B")
@@ -682,7 +677,6 @@ class MainActivity : AppCompatActivity() {
         val weeklyPct = (totalChecks * 100) / (totalHabits * 7)
         val dayPercentages = dayTotals.map { (it * 100) / totalHabits }.toIntArray()
 
-        // 1. Streako "Trust the Process" + Weekly Bar Chart Card
         val bannerCard = createGlassCard("#11192C", "#10B981")
         val tvTrust = TextView(this).apply {
             text = "trust the process."
@@ -718,7 +712,6 @@ class MainActivity : AppCompatActivity() {
         bannerCard.addView(tvWeeklySummary)
         consistencyContentContainer.addView(bannerCard)
 
-        // 2. 7-Day Habit & Study Checkmark Matrix Grid
         val matrixCard = createGlassCard("#11192C", "#243556")
         matrixCard.addView(createSectionLabel("7-DAY HABIT & CONSISTENCY MATRIX (M - S)"))
 
@@ -820,7 +813,6 @@ class MainActivity : AppCompatActivity() {
         matrixCard.addView(habitActionRow)
         consistencyContentContainer.addView(matrixCard)
 
-        // 3. Dedicated Workout & Physical Training Tracker Card
         val workoutCard = createGlassCard("#11192C", "#F59E0B")
         workoutCard.addView(createSectionLabel("🏋️ WORKOUT & PHYSICAL TRAINING TRACKER"))
 
@@ -1070,7 +1062,6 @@ class MainActivity : AppCompatActivity() {
         val studyGoalPct = ((totalMinutes * 100) / 180).coerceAtMost(100)
         focusRingView.setProgress(studyGoalPct, "${totalMinutes}m / 180m")
 
-        // Calculate Today's Habit %
         val habitsArray = JSONArray(prefs.getString("habits_matrix_json", "[]"))
         val todayIndex = ((Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7)
         var todayDone = 0
@@ -1220,9 +1211,6 @@ class MainActivity : AppCompatActivity() {
         return String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
     }
 
-    // ====================================================
-    // GLASSMORPHISM UI HELPERS & CUSTOM CANVAS VIEWS
-    // ====================================================
     private fun createSectionLabel(title: String): TextView {
         return TextView(this).apply {
             text = title
@@ -1286,7 +1274,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Custom Circular Progress Ring (Regain & Streako Style)
     class CircularRingView(
         context: Context,
         private val accentHex: String,
@@ -1341,7 +1328,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Custom 7-Day Consistency Bar Chart (Streako Style)
     class WeeklyBarChartView(
         context: Context,
         private val dayScores: IntArray
@@ -1357,7 +1343,7 @@ class MainActivity : AppCompatActivity() {
         }
         private val days = arrayOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
         private val colors = arrayOf(
-            "#38BDF8", "#38BDF8", "#818CF8", "#A78bfa", "#F472B6", "#34D399", "#10B981"
+            "#38BDF8", "#38BDF8", "#818CF8", "#A78BFA", "#F472B6", "#34D399", "#10B981"
         )
         private val rect = RectF()
 
