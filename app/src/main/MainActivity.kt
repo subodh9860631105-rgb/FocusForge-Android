@@ -20,6 +20,7 @@ import android.os.CountDownTimer
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.LinearInterpolator
@@ -39,6 +40,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 class MainActivity : AppCompatActivity() {
@@ -46,16 +48,28 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private var countDownTimer: CountDownTimer? = null
     private var restCountDownTimer: CountDownTimer? = null
+    private var workoutStopwatchTimer: CountDownTimer? = null
+
     private var isTimerRunning = false
     private var initialTimeMillis: Long = 45 * 60 * 1000L
     private var timeLeftInMillis: Long = initialTimeMillis
     private var restTimeLeftSeconds: Int = 0
+    private var workoutElapsedSeconds: Int = 0
+    private var isWorkoutStopwatchRunning = false
+
     private var selectedSubject = "CA Found: Business Laws"
     private var selectedCourseFilter = "All"
+
+    // Workout Studio State (4 Clean Sub-Tabs: 0=Training, 1=Workout.Cool Finder, 2=Exercises, 3=Report)
+    private var workoutSubTab = 0
     private var selectedMuscleFilter = "All"
     private var selectedEquipmentFilter = "All"
+    private var selectedSplitFilter = "All"
+    private var exerciseSearchQuery = ""
+    private val expandedExerciseIds = mutableSetOf("row_bb", "bench_bb", "pushup_bw")
     private var currentTab = 0
 
+    // Main Tab Containers
     private lateinit var tabFocusContainer: LinearLayout
     private lateinit var tabSyllabusContainer: LinearLayout
     private lateinit var tabConsistencyContainer: LinearLayout
@@ -63,6 +77,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tabShieldContainer: LinearLayout
     private val navButtons = mutableListOf<Button>()
 
+    // Header & Focus Views
     private lateinit var tvHunterBadge: TextView
     private lateinit var tvXpSub: TextView
     private lateinit var xpProgressBar: ProgressBar
@@ -77,6 +92,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cbStrictLock: CheckBox
     private lateinit var subjectChipRow: LinearLayout
 
+    // Dynamic Containers
     private lateinit var courseFilterRow: LinearLayout
     private lateinit var syllabusListContainer: LinearLayout
     private lateinit var formulaVaultContainer: LinearLayout
@@ -85,6 +101,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var customBlockedAppsContainer: LinearLayout
     private lateinit var btnBlockerToggle: Button
     private var tvRestTimerStatus: TextView? = null
+    private var tvWorkoutStopwatch: TextView? = null
 
     data class ExerciseMeta(
         val id: String,
@@ -92,51 +109,98 @@ class MainActivity : AppCompatActivity() {
         val muscle: String,
         val secondaryMuscles: String,
         val equipment: String,
+        val splitTag: String,
         val animType: Int,
         val howToSteps: String,
+        val proTips: String,
         val isCustom: Boolean = false
     )
 
     private val defaultExerciseCatalog = listOf(
         ExerciseMeta(
-            "row_bb", "Bent-Over Row • Barbell", "Back", "Back • Arms • Core", "Barbell", 1,
-            "1. Stand with feet shoulder-width apart, knees slightly bent.\n2. Hinge forward at hips keeping back flat.\n3. Pull barbell toward lower chest/upper abs, squeezing shoulder blades.\n4. Lower slowly under control."
+            "row_bb", "Bent-Over Row * Barbell", "Back", "Back • Chest • ABS • ARMS", "Barbell", "Pull", 1,
+            "1. Stand with feet shoulder-width apart, knees slightly bent.\n2. Hinge forward at the hips (45° angle) keeping your spine neutral.\n3. Pull the barbell toward your lower chest/upper abs, driving elbows back.\n4. Squeeze your lats at the top for 1 second, then lower slowly.",
+            "Keep the bar close to your thighs and avoid jerking your torso upward."
         ),
         ExerciseMeta(
-            "bench_bb", "Flat Bench Press • Barbell", "Chest", "Chest • Shoulders • Arms", "Barbell", 0,
-            "1. Lie flat on bench with eyes under the bar.\n2. Grip bar slightly wider than shoulder-width.\n3. Lower bar to mid-chest keeping elbows at 45°.\n4. Press bar up explosively until arms lock out."
+            "lat_cable", "Lat Pulldown * Cable", "Back", "Back • Arms • Shoulders", "Cable Machine", "Pull", 4,
+            "1. Sit tall with thighs locked under the pad and grip the bar wider than shoulder-width.\n2. Depress your shoulder blades and pull the bar smoothly down to your upper chest.\n3. Squeeze your lats hard at the bottom.\n4. Control the weight all the way back up until your lats are fully stretched.",
+            "Think about pulling your elbows down into your back pockets rather than pulling with your hands."
         ),
         ExerciseMeta(
-            "pushup_bw", "Push-Up • Classic", "Chest", "Chest • Arms • Abs", "Body Weight", 0,
-            "1. Place hands slightly wider than shoulders in high plank.\n2. Keep core braced and body in a straight line.\n3. Lower chest to just above the floor.\n4. Push back up to starting plank position."
+            "deadlift_bb", "Deadlift * Barbell", "Back", "Back • Legs • Glutes • Core", "Barbell", "Pull", 1,
+            "1. Stand with mid-foot under the barbell, hip-width stance.\n2. Hinge down and grip the bar just outside your shins.\n3. Brace your core, flatten your back, and drive the floor away with your legs.\n4. Lock out hips and knees together at the top.",
+            "Never round your lower back; keep the bar dragging lightly along your shins."
         ),
         ExerciseMeta(
-            "curl_db", "Bicep Curl • Dumbbell", "Arms", "Arms • Forearms", "Dumbbell", 2,
-            "1. Stand tall holding dumbbells at sides with palms facing forward.\n2. Keep elbows pinned to your torso.\n3. Curl weights up toward shoulders.\n4. Squeeze biceps at top, then lower slowly."
+            "back_ext", "Back Extension on Floor / Bench", "Back", "Lower Back • Glutes • Core", "Body Weight", "Home", 5,
+            "1. Lie face down on a mat or Roman chair with hands behind your head or across chest.\n2. Engage your lower back and glutes to lift your upper torso off the floor.\n3. Hold briefly at the top, then lower gently.",
+            "Avoid hyperextending your neck; keep your gaze down toward the mat."
         ),
         ExerciseMeta(
-            "lat_cable", "Lat Pulldown • Cable Machine", "Back", "Back • Arms", "Cable Machine", 4,
-            "1. Sit securely with thighs under pads and grip bar wide.\n2. Pull bar down smoothly to upper chest while leaning slightly back.\n3. Squeeze lats hard at the bottom.\n4. Return bar upward with control."
+            "bench_bb", "Flat Bench Press * Barbell", "Chest", "Chest • Shoulders • Arms", "Barbell", "Push", 0,
+            "1. Lie flat on the bench with your eyes directly underneath the bar.\n2. Plant feet firmly on the floor and retract your shoulder blades.\n3. Lower the bar under control to your mid-chest with elbows tucked ~45°.\n4. Press the bar up and slightly back toward your shoulders.",
+            "Keep your wrists straight and glutes in contact with the bench throughout the set."
         ),
         ExerciseMeta(
-            "squat_smith", "Squat • Smith Machine / Barbell", "Legs", "Legs • Glutes • Core", "Smith Machine", 3,
-            "1. Position bar across upper traps and unrack.\n2. Brace core and sit hips back and down until thighs are parallel.\n3. Drive through heels to stand back up."
+            "incline_db", "Incline Chest Press * Dumbbell", "Chest", "Chest • Shoulders • Triceps", "Dumbbell", "Push", 0,
+            "1. Set bench to a 30°–45° incline and sit back with dumbbells on thighs.\n2. Kick weights up to shoulder level with palms facing forward.\n3. Press dumbbells overhead until arms are extended without clanking them.\n4. Lower slowly until you feel a deep stretch in your upper chest.",
+            "A 30° angle targets the upper pecs best without overworking the front delts."
         ),
         ExerciseMeta(
-            "ab_wheel", "Ab Wheel Rollout / Plank", "Abs", "Abs • Core • Lower Back", "Body Weight", 5,
-            "1. Kneel on floor holding ab wheel or assume forearm plank.\n2. Roll forward slowly while keeping abs tight and lower back flat.\n3. Pull back using core muscles to starting position."
+            "pushup_bw", "Push-up * Classic", "Chest", "Chest • Arms • Abs", "Body Weight", "Home", 0,
+            "1. Set hands slightly wider than shoulder-width in a rigid plank position.\n2. Brace your abs and glutes so your body forms a straight line.\n3. Lower your chest until it is 1 inch above the floor.\n4. Push explosively back to full arm extension.",
+            "Do not let your hips sag or flare your elbows out to 90 degrees."
         ),
         ExerciseMeta(
-            "shoulder_db", "Overhead Shoulder Press • Dumbbell", "Shoulders", "Shoulders • Arms", "Dumbbell", 4,
-            "1. Sit or stand holding dumbbells at shoulder height.\n2. Press weights overhead until arms are extended.\n3. Lower slowly back to ear level."
+            "cable_fly", "Chest Fly * Cable Machine", "Chest", "Chest • Front Delts", "Cable Machine", "Push", 0,
+            "1. Set both pulleys to chest height and step forward into a staggered stance.\n2. With a slight bend in your elbows, bring handles together in a wide arc.\n3. Squeeze your inner chest hard where hands meet.\n4. Return slowly until chest is stretched.",
+            "Maintain the exact same elbow bend throughout the movement—hug a barrel."
         ),
         ExerciseMeta(
-            "lunge_db", "Backward Lunge • Dumbbell", "Legs", "Legs • Glutes", "Dumbbell", 3,
-            "1. Stand tall holding dumbbells at sides.\n2. Step one foot backward and lower until both knees form 90° angles.\n3. Push through front heel to return to standing."
+            "curl_db", "Bicep Curl * Dumbbell", "Arms", "Arms • Biceps • Forearms", "Dumbbell", "Pull", 2,
+            "1. Stand tall holding dumbbells at your sides with palms facing forward.\n2. Pin your elbows tightly against your ribs.\n3. Curl the weights upward while supinating (twisting) your wrists.\n4. Contract biceps hard at the top and lower for a 2-second count.",
+            "Avoid swinging your lower back; if you must swing, reduce the weight by 2.5 kg."
         ),
         ExerciseMeta(
-            "side_plank", "Side Plank Knee to Elbow", "Core", "Core • Abs • Obliques", "Body Weight", 5,
-            "1. Lie on side propped on forearm with hips lifted.\n2. Bring top knee and top elbow together over your waist.\n3. Extend back out while keeping hips elevated."
+            "tricep_cable", "Tricep Rope Pushdown * Cable", "Arms", "Arms • Triceps", "Cable Machine", "Push", 2,
+            "1. Attach a rope to a high pulley and grab ends with a neutral grip.\n2. Pin upper arms to your sides and lean slightly forward.\n3. Extend forearms downward, pulling the rope ends apart at the bottom.\n4. Squeeze triceps for 1 second, then return to 90°.",
+            "Only your forearms should move; keep your shoulders and elbows locked in place."
+        ),
+        ExerciseMeta(
+            "shoulder_db", "Overhead Press * Dumbbell", "Shoulders", "Shoulders • Arms • Core", "Dumbbell", "Push", 4,
+            "1. Sit on an upright bench or stand tall holding dumbbells at ear level.\n2. Brace your core and press weights vertically overhead.\n3. Stop just short of locking out and lower smoothly back to chin height.",
+            "Press in a slight natural arc so the weights finish directly over your ears."
+        ),
+        ExerciseMeta(
+            "lat_raise_db", "Lateral Raise & Arm Circles", "Shoulders", "Shoulders • Side Delts", "Dumbbell", "Push", 4,
+            "1. Stand tall with dumbbells at your sides and a slight bend in elbows.\n2. Raise arms out to the sides until elbows reach shoulder height.\n3. Pause briefly at the top, then lower slowly resisting gravity.",
+            "Lead with your elbows and pinkies slightly higher than thumbs to isolate side delts."
+        ),
+        ExerciseMeta(
+            "squat_smith", "Squat * Smith Machine / Barbell", "Legs", "Legs • Glutes • Core", "Smith Machine", "Legs", 3,
+            "1. Position bar across upper traps, unhook safety latches, and set feet shoulder-width.\n2. Inhale, brace your abs, and sit hips back and down until thighs are parallel.\n3. Drive hard through your mid-foot and heels to stand tall.",
+            "Keep your knees tracking in the same direction as your toes throughout the squat."
+        ),
+        ExerciseMeta(
+            "lunge_db", "Backward Lunge * Dumbbell", "Legs", "Legs • Glutes • Hamstrings", "Dumbbell", "Legs", 3,
+            "1. Stand tall holding dumbbells at your sides.\n2. Step one foot backward and lower your back knee toward the floor.\n3. Keep your front shin vertical and drive through your front heel to return.",
+            "Stepping backward places less shear stress on the knees and activates glutes more."
+        ),
+        ExerciseMeta(
+            "ab_wheel", "Ab Wheel Rollout", "Abs", "Abs • Core • Lower Back", "Body Weight", "Home", 5,
+            "1. Kneel on a padded mat holding the ab wheel handles directly under shoulders.\n2. Brace your abs tightly (posterior pelvic tilt) and roll forward slowly.\n3. Go as far as you can without letting your lower back arch.\n4. Crunch abs to pull yourself back to the kneeling position.",
+            "Exhale as you roll back in and keep your ribcage tucked toward your pelvis."
+        ),
+        ExerciseMeta(
+            "side_plank", "Side Plank Knee to Elbow", "Abs", "Abs • Core • Obliques", "Body Weight", "Home", 5,
+            "1. Prop yourself up on one forearm in a side plank with hips lifted high.\n2. Extend your top arm overhead and top leg straight.\n3. Crunch your top elbow and top knee together over your waist.\n4. Extend back out while keeping hips off the floor.",
+            "Great no-equipment movement for obliques and lateral core stability."
+        ),
+        ExerciseMeta(
+            "situp_twist", "Sit-up Twist & Reverse Plank", "Core", "Abs • Core • Lower Back", "Body Weight", "Home", 5,
+            "1. Lie on your back with knees bent and hands lightly behind ears.\n2. Sit up and rotate your torso to touch your right elbow to your left knee.\n3. Lower back down and alternate to the opposite side.",
+            "Rotate your entire ribcage rather than just pulling on your neck with your hands."
         )
     )
 
@@ -169,9 +233,10 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
-            setPadding(34, 48, 34, 48)
+            setPadding(32, 46, 32, 46)
         }
 
+        // TOP GLASS HEADER
         val headerCard = createGlassCard("#10192D", "#2A4365")
         val titleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -242,6 +307,7 @@ class MainActivity : AppCompatActivity() {
         headerCard.addView(tvAccessibilityBanner)
         rootContent.addView(headerCard)
 
+        // 5 MAIN TAB CONTAINERS
         tabFocusContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         tabSyllabusContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         tabConsistencyContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -1246,10 +1312,6 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Cancel", null)
             .show()
     }
-
-    // ====================================================
-    // TAB 4: 🏋️ WORKOUT STUDIO (REST TIMER + CUSTOM EXERCISE + SETS)
-    // ====================================================
     private fun buildWorkoutStudioTab() {
         workoutContentContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         tabWorkoutContainer.addView(workoutContentContainer)
@@ -1261,15 +1323,18 @@ class MainActivity : AppCompatActivity() {
         val customArr = JSONArray(prefs.getString("custom_exercises_json", "[]"))
         for (i in 0 until customArr.length()) {
             val o = customArr.getJSONObject(i)
+            val m = o.optString("muscle", "Chest")
             list.add(
                 ExerciseMeta(
                     id = o.optString("id", "cust_$i"),
                     name = o.optString("name", "Custom Exercise"),
-                    muscle = o.optString("muscle", "Chest"),
-                    secondaryMuscles = o.optString("muscle", "Full Body"),
+                    muscle = m,
+                    secondaryMuscles = "$m • Core",
                     equipment = o.optString("equipment", "Dumbbell"),
+                    splitTag = o.optString("split", "Custom"),
                     animType = o.optInt("animType", 0),
                     howToSteps = o.optString("steps", "Maintain controlled form and full range of motion."),
+                    proTips = "Focus on mind-muscle connection and controlled 2-second lowering.",
                     isCustom = true
                 )
             )
@@ -1280,149 +1345,251 @@ class MainActivity : AppCompatActivity() {
     private fun renderWorkoutStudioTab() {
         workoutContentContainer.removeAllViews()
 
-        val workoutsDone = prefs.getInt("workouts_completed", 0)
-        val workoutMins = prefs.getInt("workout_minutes", 0)
-        val totalVolumeKg = calculateTotalVolumeKg()
+        // Top Sub-Navigation Bar (Training | Generator | Exercises | Report)
+        val subNavCard = createGlassCard("#10192D", "#2A4365").apply {
+            setPadding(20, 20, 20, 20)
+        }
+        val subNavRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val subTabs = listOf(
+            "🏋️ Training",
+            "🧭 Generator",
+            "📋 Exercises",
+            "📊 Report"
+        )
+        subTabs.forEachIndexed { idx, title ->
+            val isSel = workoutSubTab == idx
+            val btn = Button(this).apply {
+                text = title
+                isAllCaps = false
+                textSize = 11f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(if (isSel) Color.parseColor("#060A12") else Color.parseColor("#E2E8F0"))
+                background = if (isSel) {
+                    createGlassDrawable("#34D399", "#10B981", 24f)
+                } else {
+                    createGlassDrawable("#090F1D", "#1E293B", 24f)
+                }
+                setPadding(12, 12, 12, 12)
+                val p = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                p.setMargins(4, 0, 4, 0)
+                layoutParams = p
+                setOnClickListener {
+                    workoutSubTab = idx
+                    renderWorkoutStudioTab()
+                }
+            }
+            subNavRow.addView(btn)
+        }
+        subNavCard.addView(subNavRow)
+        workoutContentContainer.addView(subNavCard)
 
-        // 0. LIVE REST COUNTDOWN TIMER BAR (Screenshot 7 00:48 Rest Bar Style)
-        val restCard = createGlassCard("#10192D", "#10B981")
-        restCard.addView(createSectionLabel("⏱️ WEIGHTLIFTING SET REST TIMER (AUTO-STARTS ON SET CHECK)"))
+        when (workoutSubTab) {
+            0 -> renderActiveTrainingSubTab()
+            1 -> renderWorkoutCoolGeneratorSubTab()
+            2 -> renderExerciseLibrarySubTab()
+            3 -> renderFitnessReportSubTab()
+        }
+    }
+
+    // ----------------------------------------------------
+    // SUB-TAB 0: WEIGHTLIFTING TOOL FLEXIBLE (ACTIVE TRAINING)
+    // ----------------------------------------------------
+    private fun renderActiveTrainingSubTab() {
+        // 1. Live Session Stopwatch & Rest Timer Bar (Screenshot 7 Style)
+        val topToolCard = createGlassCard("#10192D", "#10B981")
+        val headerBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 14)
+        }
+
+        val activeFilterTitle = if (selectedMuscleFilter == "All" && selectedEquipmentFilter == "All") {
+            "Active Workout"
+        } else {
+            "${if (selectedMuscleFilter == "All") "Full Body" else selectedMuscleFilter} • ${if (selectedEquipmentFilter == "All") "All Equip" else selectedEquipmentFilter}"
+        }
+
+        val tvWorkoutHeader = TextView(this).apply {
+            text = "🏋️ $activeFilterTitle"
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            setTypeface(null, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        tvWorkoutStopwatch = TextView(this).apply {
+            text = String.format(Locale.getDefault(), "⏱️ %02d:%02d", workoutElapsedSeconds / 60, workoutElapsedSeconds % 60)
+            setTextColor(Color.parseColor("#4ADE80"))
+            textSize = 15f
+            setTypeface(null, Typeface.BOLD)
+            background = createGlassDrawable("#064E3B", "#10B981", 20f)
+            setPadding(24, 10, 24, 10)
+            setOnClickListener { toggleWorkoutStopwatch() }
+        }
+
+        val btnFinishWorkout = Button(this).apply {
+            text = "Finish"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            background = createGlassDrawable("#1E293B", "#38BDF8", 20f)
+            setPadding(26, 10, 26, 10)
+            val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            p.setMargins(12, 0, 0, 0)
+            layoutParams = p
+            setOnClickListener {
+                val mins = (workoutElapsedSeconds / 60).coerceAtLeast(25)
+                val vol = calculateTotalVolumeKg()
+                stopWorkoutStopwatch()
+                logWorkoutSession(activeFilterTitle, mins, "Total Volume: $vol kg")
+                workoutSubTab = 3
+                renderWorkoutStudioTab()
+            }
+        }
+
+        headerBar.addView(tvWorkoutHeader)
+        headerBar.addView(tvWorkoutStopwatch)
+        headerBar.addView(btnFinishWorkout)
+        topToolCard.addView(headerBar)
 
         tvRestTimerStatus = TextView(this).apply {
             text = if (restTimeLeftSeconds > 0) {
-                String.format(Locale.getDefault(), "🟢 RESTING: %02d:%02d", restTimeLeftSeconds / 60, restTimeLeftSeconds % 60)
+                String.format(Locale.getDefault(), "🟢 REST TIMER: %02d:%02d", restTimeLeftSeconds / 60, restTimeLeftSeconds % 60)
             } else {
-                "⏱️ Rest Timer Ready (Tap 30s / 60s / 90s or check a set)"
+                "⏱️ Rest Timer Ready (Auto-starts 60s when you check a set)"
             }
-            setTextColor(Color.parseColor("#4ADE80"))
-            textSize = 20f
+            setTextColor(Color.parseColor("#A7F3D0"))
+            textSize = 13f
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
-            background = createGlassDrawable("#064E3B", "#10B981", 22f)
-            setPadding(24, 18, 24, 18)
+            background = createGlassDrawable("#090F1D", "#1E293B", 18f)
+            setPadding(20, 14, 20, 14)
         }
-        restCard.addView(tvRestTimerStatus)
+        topToolCard.addView(tvRestTimerStatus)
 
         val restBtnsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 12, 0, 0)
+            setPadding(0, 10, 0, 0)
         }
-        restBtnsRow.addView(createPillButton("30s Rest") { startRestTimer(30) })
-        restBtnsRow.addView(createPillButton("60s Rest") { startRestTimer(60) })
-        restBtnsRow.addView(createPillButton("90s Rest") { startRestTimer(90) })
+        restBtnsRow.addView(createPillButton("30s") { startRestTimer(30) })
+        restBtnsRow.addView(createPillButton("60s") { startRestTimer(60) })
+        restBtnsRow.addView(createPillButton("90s") { startRestTimer(90) })
+        restBtnsRow.addView(createPillButton("+15s") { startRestTimer(restTimeLeftSeconds + 15) })
         restBtnsRow.addView(createPillButton("Stop") { stopRestTimer() })
-        restCard.addView(restBtnsRow)
-        workoutContentContainer.addView(restCard)
+        topToolCard.addView(restBtnsRow)
+        workoutContentContainer.addView(topToolCard)
 
-        // 1. FITNESS TRACKER SMART REPORT + ANATOMICAL MUSCLE BODY MAP
-        val reportCard = createGlassCard("#10192D", "#EF4444")
-        reportCard.addView(createSectionLabel("FITNESS TRACKER SMART • VOLUME & FOCUS AREA MAP"))
-
-        val metricsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            background = createGlassDrawable("#090F1D", "#1E293B", 24f)
-            setPadding(20, 22, 20, 22)
-        }
-        metricsRow.addView(createStatColumn("$workoutsDone", "Workouts", "#F8FAFC"))
-        metricsRow.addView(createStatColumn("${workoutMins}m", "Time (min)", "#38BDF8"))
-        metricsRow.addView(createStatColumn("$totalVolumeKg", "Volume (kg)", "#F43F5E"))
-        reportCard.addView(metricsRow)
-
-        val bodyMapView = MuscleBodyMapView(this, selectedMuscleFilter).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 330).apply {
-                setMargins(0, 18, 0, 8)
-            }
-        }
-        reportCard.addView(bodyMapView)
-        workoutContentContainer.addView(reportCard)
-
-        // 2. WORKOUT.COOL SMART FILTER + ADD CUSTOM EXERCISE
-        val filterCard = createGlassCard("#10192D", "#2A4365")
-        filterCard.addView(createSectionLabel("STEP 1: SELECT EQUIPMENT (WORKOUT.COOL GENERATOR)"))
-
-        val eqScroll = HorizontalScrollView(this).apply {
+        // 2. Quick Split & Filter Chips Bar
+        val splitScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
-            setPadding(0, 6, 0, 18)
+            setPadding(0, 0, 0, 20)
         }
-        val eqRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val equipments = listOf("All", "Body Weight", "Dumbbell", "Barbell", "Cable Machine", "Smith Machine")
-        equipments.forEach { eq ->
-            val isSel = selectedEquipmentFilter == eq
-            val btn = Button(this).apply {
-                text = if (eq == "Body Weight") "🤸 Body Weight / No Eq" else "🏋️ $eq"
+        val splitRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val splits = listOf(
+            "All" to "🔥 All Exercises",
+            "Push" to "💪 Push (Chest/Shld/Tri)",
+            "Pull" to "🦅 Pull (Back/Biceps)",
+            "Legs" to "🦵 Legs & Glutes",
+            "Home" to "🏠 Home (No Equip)"
+        )
+        splits.forEach { (key, label) ->
+            val isSel = selectedSplitFilter == key
+            val chip = Button(this).apply {
+                text = label
                 isAllCaps = false
                 textSize = 11.5f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(if (isSel) Color.parseColor("#060A12") else Color.WHITE)
-                background = if (isSel) createGlassDrawable("#34D399", "#10B981", 30f) else createGlassDrawable("#1E293B", "#334155", 30f)
-                setPadding(28, 12, 28, 12)
+                background = if (isSel) createGlassDrawable("#38BDF8", "#7DD3FC", 28f) else createGlassDrawable("#10192D", "#243B61", 28f)
+                setPadding(26, 10, 26, 10)
                 val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                 p.setMargins(0, 0, 12, 0)
                 layoutParams = p
                 setOnClickListener {
-                    selectedEquipmentFilter = eq
+                    selectedSplitFilter = key
+                    if (key == "Home") {
+                        selectedEquipmentFilter = "Body Weight"
+                        selectedMuscleFilter = "All"
+                    } else if (key != "All") {
+                        selectedEquipmentFilter = "All"
+                        selectedMuscleFilter = "All"
+                    }
                     renderWorkoutStudioTab()
                 }
             }
-            eqRow.addView(btn)
+            splitRow.addView(chip)
         }
-        eqScroll.addView(eqRow)
-        filterCard.addView(eqScroll)
+        splitScroll.addView(splitRow)
+        workoutContentContainer.addView(splitScroll)
 
-        filterCard.addView(createSectionLabel("STEP 2: SELECT FOCUS AREA / TARGET MUSCLE"))
-        val muscleScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            setPadding(0, 6, 0, 14)
-        }
-        val mRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val muscles = listOf("All", "Chest", "Back", "Arms", "Abs", "Shoulders", "Legs", "Core")
-        muscles.forEach { m ->
-            val isSel = selectedMuscleFilter == m
-            val btn = Button(this).apply {
-                text = m.uppercase(Locale.getDefault())
-                isAllCaps = false
-                textSize = 11.5f
+        // Active filter status pill if filtered from Generator
+        if (selectedMuscleFilter != "All" || selectedEquipmentFilter != "All") {
+            val filterBanner = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = createGlassDrawable("#1E293B", "#38BDF8", 22f)
+                setPadding(24, 14, 20, 14)
+                val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                p.setMargins(0, 0, 0, 20)
+                layoutParams = p
+            }
+            filterBanner.addView(TextView(this).apply {
+                text = "🎯 Active Filter: Muscle = $selectedMuscleFilter  •  Equip = $selectedEquipmentFilter"
+                setTextColor(Color.parseColor("#38BDF8"))
+                textSize = 12f
                 setTypeface(null, Typeface.BOLD)
-                setTextColor(Color.WHITE)
-                background = if (isSel) createGlassDrawable("#DC2626", "#F87171", 30f) else createGlassDrawable("#1E293B", "#334155", 30f)
-                setPadding(28, 12, 28, 12)
-                val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                p.setMargins(0, 0, 12, 0)
-                layoutParams = p
-                setOnClickListener {
-                    selectedMuscleFilter = m
-                    renderWorkoutStudioTab()
-                }
-            }
-            mRow.addView(btn)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            filterBanner.addView(createMiniTagButton("✕ Reset", "#450A0A", "#EF4444", "#FCA5A5") {
+                selectedMuscleFilter = "All"
+                selectedEquipmentFilter = "All"
+                selectedSplitFilter = "All"
+                renderWorkoutStudioTab()
+            })
+            workoutContentContainer.addView(filterBanner)
         }
-        muscleScroll.addView(mRow)
-        filterCard.addView(muscleScroll)
 
-        filterCard.addView(createActionButton("+ Create Custom Exercise & Set (Add to Catalog)", "#0284C7", "#38BDF8") {
-            showAddCustomExerciseDialog()
-        })
-        workoutContentContainer.addView(filterCard)
-
-        // 3. EXERCISE CARDS
+        // 3. Flexible Weightlifting Exercise Cards
         val setsStateObj = JSONObject(prefs.getString("workout_sets_json", "{}"))
-        val allExercises = getFullExerciseCatalog()
-        val filteredExercises = allExercises.filter { ex ->
-            (selectedMuscleFilter == "All" || ex.muscle.equals(selectedMuscleFilter, true) || ex.secondaryMuscles.contains(selectedMuscleFilter, true)) &&
-            (selectedEquipmentFilter == "All" || ex.equipment.equals(selectedEquipmentFilter, true))
+        val filteredExercises = getFullExerciseCatalog().filter { ex ->
+            val matchMuscle = selectedMuscleFilter == "All" || ex.muscle.equals(selectedMuscleFilter, true) || ex.secondaryMuscles.contains(selectedMuscleFilter, true)
+            val matchEquip = selectedEquipmentFilter == "All" || ex.equipment.equals(selectedEquipmentFilter, true)
+            val matchSplit = selectedSplitFilter == "All" || ex.splitTag.equals(selectedSplitFilter, true)
+            matchMuscle && matchEquip && matchSplit
         }
 
         filteredExercises.forEach { ex ->
-            val exCard = createGlassCard("#10192D", "#243B61")
+            val isExpanded = expandedExerciseIds.contains(ex.id)
+            val exCard = createGlassCard("#10192D", if (isExpanded) "#38BDF8" else "#243B61")
+
+            val exSetsArr = setsStateObj.optJSONArray(ex.id) ?: createDefaultSetsForExercise()
+            setsStateObj.put(ex.id, exSetsArr)
+            var doneSets = 0
+            var best1Rm = 0
+            for (s in 0 until exSetsArr.length()) {
+                val sObj = exSetsArr.getJSONObject(s)
+                if (sObj.optBoolean("done", false)) doneSets++
+                val kg = sObj.optInt("kg", 20)
+                val reps = sObj.optInt("reps", 12)
+                val est1Rm = (kg * (1.0 + reps / 30.0)).roundToInt()
+                if (est1Rm > best1Rm) best1Rm = est1Rm
+            }
+
             val topRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 0, 0, 14)
+                setOnClickListener {
+                    if (isExpanded) expandedExerciseIds.remove(ex.id) else expandedExerciseIds.add(ex.id)
+                    renderWorkoutStudioTab()
+                }
             }
 
             val animThumb = ExerciseAnimView(this, ex.animType).apply {
-                layoutParams = LinearLayout.LayoutParams(150, 150).apply { setMargins(0, 0, 20, 0) }
+                layoutParams = LinearLayout.LayoutParams(135, 135).apply { setMargins(0, 0, 18, 0) }
                 setOnClickListener { showExerciseVideoGuideDialog(ex) }
             }
 
@@ -1431,174 +1598,577 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
 
-            val exSetsArr = setsStateObj.optJSONArray(ex.id) ?: createDefaultSetsForExercise()
-            setsStateObj.put(ex.id, exSetsArr)
-            var doneSets = 0
-            for (s in 0 until exSetsArr.length()) {
-                if (exSetsArr.getJSONObject(s).optBoolean("done", false)) doneSets++
-            }
-
-            val tvExTitle = TextView(this).apply {
+            metaCol.addView(TextView(this).apply {
                 text = ex.name
                 setTextColor(Color.WHITE)
-                textSize = 16f
+                textSize = 15.5f
                 setTypeface(null, Typeface.BOLD)
-            }
-            val tvExSub = TextView(this).apply {
-                text = "🎯 ${ex.secondaryMuscles}  •  🏋️ ${ex.equipment}"
+            })
+            metaCol.addView(TextView(this).apply {
+                text = "🎯 ${ex.muscle}  •  🏋️ ${ex.equipment}  •  🏆 1RM: ${best1Rm}kg"
                 setTextColor(Color.parseColor("#38BDF8"))
-                textSize = 11.5f
+                textSize = 11f
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, 4, 0, 4)
-            }
-            val tvDoneSets = TextView(this).apply {
-                text = "$doneSets/${exSetsArr.length()} Sets Done"
-                setTextColor(Color.parseColor("#A7F3D0"))
-                textSize = 12f
-                setTypeface(null, Typeface.BOLD)
-            }
-
-            metaCol.addView(tvExTitle)
-            metaCol.addView(tvExSub)
-            metaCol.addView(tvDoneSets)
-
-            val btnVideoGuide = Button(this).apply {
-                text = "▶ Guide"
-                isAllCaps = false
-                setTextColor(Color.WHITE)
+            })
+            metaCol.addView(TextView(this).apply {
+                text = "$doneSets/${exSetsArr.length()} Done  (Tap card to ${if (isExpanded) "collapse ⌃" else "expand sets ⌄"})"
+                setTextColor(if (doneSets == exSetsArr.length()) Color.parseColor("#4ADE80") else Color.parseColor("#94A3B8"))
                 textSize = 11.5f
                 setTypeface(null, Typeface.BOLD)
-                background = createGlassDrawable("#DC2626", "#F87171", 24f)
-                setPadding(22, 12, 22, 12)
+            })
+
+            val btnVideoGuide = Button(this).apply {
+                text = "▶ Video"
+                isAllCaps = false
+                setTextColor(Color.WHITE)
+                textSize = 11f
+                setTypeface(null, Typeface.BOLD)
+                background = createGlassDrawable("#DC2626", "#F87171", 22f)
+                setPadding(20, 10, 20, 10)
                 setOnClickListener { showExerciseVideoGuideDialog(ex) }
             }
 
             topRow.addView(animThumb)
             topRow.addView(metaCol)
             topRow.addView(btnVideoGuide)
-            if (ex.isCustom) {
-                topRow.addView(createMiniTagButton("🗑️", "#450A0A", "#EF4444", "#FCA5A5") {
-                    deleteCustomExercise(ex.id)
-                })
-            }
             exCard.addView(topRow)
 
-            for (s in 0 until exSetsArr.length()) {
-                val setObj = exSetsArr.getJSONObject(s)
-                val kg = setObj.optInt("kg", 20)
-                val reps = setObj.optInt("reps", 12)
-                val isDone = setObj.optBoolean("done", false)
-
-                val setRow = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    background = if (isDone) {
-                        createGlassDrawable("#16A34A", "#4ADE80", 26f)
-                    } else {
-                        createGlassDrawable("#090F1D", "#1E293B", 26f)
-                    }
-                    setPadding(24, 16, 20, 16)
-                    val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                    lp.setMargins(0, 0, 0, 10)
-                    layoutParams = lp
+            if (isExpanded) {
+                val setsWrap = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(0, 18, 0, 0)
                 }
 
-                val tvCheck = TextView(this).apply {
-                    text = if (isDone) "✓  Set ${s + 1}" else "○  Set ${s + 1}"
-                    setTextColor(Color.WHITE)
-                    textSize = 13.5f
-                    setTypeface(null, Typeface.BOLD)
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                    setOnClickListener {
-                        val nextState = !isDone
-                        setObj.put("done", nextState)
-                        prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
-                        if (nextState) {
-                            addXp(15, "Set ${s + 1} Done! (+${kg * reps} kg vol & +15 XP)")
-                            startRestTimer(60)
+                for (s in 0 until exSetsArr.length()) {
+                    val setObj = exSetsArr.getJSONObject(s)
+                    val kg = setObj.optInt("kg", 20)
+                    val reps = setObj.optInt("reps", 12)
+                    val isDone = setObj.optBoolean("done", false)
+
+                    val setRow = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        background = if (isDone) {
+                            createGlassDrawable("#16A34A", "#4ADE80", 28f)
                         } else {
-                            addXp(-15, "Set ${s + 1} Unchecked (-15 XP)")
+                            createGlassDrawable("#090F1D", "#1E293B", 28f)
+                        }
+                        setPadding(22, 16, 18, 16)
+                        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                        lp.setMargins(0, 0, 0, 10)
+                        layoutParams = lp
+                    }
+
+                    val tvCheck = TextView(this).apply {
+                        text = if (isDone) "✓   ${s + 1}" else "○   ${s + 1}"
+                        setTextColor(Color.WHITE)
+                        textSize = 14f
+                        setTypeface(null, Typeface.BOLD)
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.8f)
+                        setOnClickListener {
+                            val nextState = !isDone
+                            setObj.put("done", nextState)
+                            prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
+                            if (nextState) {
+                                if (!isWorkoutStopwatchRunning) toggleWorkoutStopwatch()
+                                addXp(15, "Set ${s + 1} Done! (+${kg * reps} kg & +15 XP)")
+                                startRestTimer(60)
+                            } else {
+                                addXp(-15, "Set ${s + 1} Unchecked (-15 XP)")
+                            }
+                            renderWorkoutStudioTab()
+                        }
+                    }
+
+                    val tvKgPill = TextView(this).apply {
+                        text = "$kg"
+                        setTextColor(if (isDone) Color.parseColor("#064E3B") else Color.WHITE)
+                        textSize = 14f
+                        setTypeface(null, Typeface.BOLD)
+                        gravity = Gravity.CENTER
+                        background = createGlassDrawable(if (isDone) "#FFFFFF" else "#1E293B", "#334155", 24f)
+                        setPadding(28, 10, 28, 10)
+                        setOnClickListener { showEditSetDialog(setsStateObj, ex.id, s) }
+                    }
+
+                    val tvKgUnit = TextView(this).apply {
+                        text = " kg   "
+                        setTextColor(Color.WHITE)
+                        textSize = 12.5f
+                        setTypeface(null, Typeface.BOLD)
+                    }
+
+                    val tvRepsPill = TextView(this).apply {
+                        text = "$reps"
+                        setTextColor(if (isDone) Color.parseColor("#064E3B") else Color.WHITE)
+                        textSize = 14f
+                        setTypeface(null, Typeface.BOLD)
+                        gravity = Gravity.CENTER
+                        background = createGlassDrawable(if (isDone) "#DCFCE7" else "#1E293B", "#334155", 24f)
+                        setPadding(28, 10, 28, 10)
+                        setOnClickListener { showEditSetDialog(setsStateObj, ex.id, s) }
+                    }
+
+                    val tvRepsUnit = TextView(this).apply {
+                        text = " Reps"
+                        setTextColor(Color.WHITE)
+                        textSize = 12.5f
+                        setTypeface(null, Typeface.BOLD)
+                    }
+
+                    val btnRemoveSet = TextView(this).apply {
+                        text = "✕"
+                        setTextColor(if (isDone) Color.WHITE else Color.parseColor("#FCA5A5"))
+                        textSize = 13f
+                        setTypeface(null, Typeface.BOLD)
+                        setPadding(20, 8, 12, 8)
+                        setOnClickListener {
+                            if (exSetsArr.length() > 1) {
+                                exSetsArr.remove(s)
+                                prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
+                                renderWorkoutStudioTab()
+                            }
+                        }
+                    }
+
+                    setRow.addView(tvCheck)
+                    setRow.addView(tvKgPill)
+                    setRow.addView(tvKgUnit)
+                    setRow.addView(tvRepsPill)
+                    setRow.addView(tvRepsUnit)
+                    setRow.addView(btnRemoveSet)
+                    setsWrap.addView(setRow)
+                }
+
+                // Detail + Add a Set Row (Screenshot 7 Style)
+                val midActionRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, 6, 0, 12)
+                }
+                midActionRow.addView(createPillButton("🎬 Detail & Muscle") { showExerciseVideoGuideDialog(ex) })
+                midActionRow.addView(createPillButton("➕ Add a set") {
+                    val lastKg = if (exSetsArr.length() > 0) exSetsArr.getJSONObject(exSetsArr.length() - 1).optInt("kg", 25) else 25
+                    exSetsArr.put(JSONObject().put("kg", lastKg).put("reps", 12).put("done", false))
+                    prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
+                    renderWorkoutStudioTab()
+                })
+                setsWrap.addView(midActionRow)
+
+                // Bottom "LOG NEXT SET" Bar (Screenshot 7 Style)
+                val btnLogNextSet = Button(this).apply {
+                    text = if (doneSets < exSetsArr.length()) "✓ LOG NEXT SET (SET ${doneSets + 1})" else "🎉 ALL SETS COMPLETED (LOG SESSION)"
+                    isAllCaps = false
+                    setTextColor(Color.WHITE)
+                    textSize = 13f
+                    setTypeface(null, Typeface.BOLD)
+                    background = createGlassDrawable("#090F1D", "#10B981", 28f)
+                    setPadding(24, 16, 24, 16)
+                    setOnClickListener {
+                        var loggedOne = false
+                        for (s in 0 until exSetsArr.length()) {
+                            val sObj = exSetsArr.getJSONObject(s)
+                            if (!sObj.optBoolean("done", false)) {
+                                sObj.put("done", true)
+                                prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
+                                if (!isWorkoutStopwatchRunning) toggleWorkoutStopwatch()
+                                addXp(15, "Logged Set ${s + 1} of ${ex.name}! (+15 XP)")
+                                startRestTimer(60)
+                                loggedOne = true
+                                break
+                            }
+                        }
+                        if (!loggedOne) {
+                            logWorkoutSession(ex.name, 15, "${exSetsArr.length()} sets completed")
                         }
                         renderWorkoutStudioTab()
                     }
                 }
-
-                val tvKgPill = TextView(this).apply {
-                    text = "$kg kg"
-                    setTextColor(if (isDone) Color.parseColor("#064E3B") else Color.WHITE)
-                    textSize = 13f
-                    setTypeface(null, Typeface.BOLD)
-                    background = createGlassDrawable(if (isDone) "#DCFCE7" else "#1E293B", "#334155", 20f)
-                    setPadding(26, 10, 26, 10)
-                    setOnClickListener { showEditSetDialog(setsStateObj, ex.id, s) }
-                }
-
-                val tvRepsPill = TextView(this).apply {
-                    text = "$reps Reps"
-                    setTextColor(if (isDone) Color.parseColor("#064E3B") else Color.WHITE)
-                    textSize = 13f
-                    setTypeface(null, Typeface.BOLD)
-                    background = createGlassDrawable(if (isDone) "#DCFCE7" else "#1E293B", "#334155", 20f)
-                    setPadding(26, 10, 26, 10)
-                    val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                    p.setMargins(12, 0, 12, 0)
-                    layoutParams = p
-                    setOnClickListener { showEditSetDialog(setsStateObj, ex.id, s) }
-                }
-
-                val btnRemoveSet = TextView(this).apply {
-                    text = "✕"
-                    setTextColor(if (isDone) Color.WHITE else Color.parseColor("#FCA5A5"))
-                    textSize = 13f
-                    setTypeface(null, Typeface.BOLD)
-                    setPadding(16, 8, 16, 8)
-                    setOnClickListener {
-                        if (exSetsArr.length() > 1) {
-                            exSetsArr.remove(s)
-                            prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
-                            renderWorkoutStudioTab()
-                        }
-                    }
-                }
-
-                setRow.addView(tvCheck)
-                setRow.addView(tvKgPill)
-                setRow.addView(tvRepsPill)
-                setRow.addView(btnRemoveSet)
-                exCard.addView(setRow)
+                setsWrap.addView(btnLogNextSet)
+                exCard.addView(setsWrap)
             }
-
-            val setActionRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, 8, 0, 0)
-            }
-            setActionRow.addView(createPillButton("🎬 Detail & Video") { showExerciseVideoGuideDialog(ex) })
-            setActionRow.addView(createPillButton("➕ Add a Set") {
-                exSetsArr.put(JSONObject().put("kg", 25).put("reps", 12).put("done", false))
-                prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
-                renderWorkoutStudioTab()
-            })
-            setActionRow.addView(createPillButton("✓ Finish Exercise") {
-                logWorkoutSession(ex.name, 15, "${exSetsArr.length()} sets completed (${ex.equipment})")
-            })
-
-            exCard.addView(setActionRow)
             workoutContentContainer.addView(exCard)
         }
         prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
+    }
 
+    // ----------------------------------------------------
+    // SUB-TAB 1: WORKOUT.COOL GENERATOR (EQUIPMENT + FOCUS AREA)
+    // ----------------------------------------------------
+    private fun renderWorkoutCoolGeneratorSubTab() {
+        // Step 1: Equipment Radio Cards (Screenshots 1 & 5 Style)
+        val equipCard = createGlassCard("#10192D", "#2A4365")
+        equipCard.addView(createSectionLabel("STEP 1: WHICH TYPE OF EQUIPMENT DO YOU HAVE?"))
+
+        val equipmentOptions = listOf(
+            Triple("Body Weight", "Body Weight / No Equipment", "🤸 Home & Calisthenics"),
+            Triple("Dumbbell", "Dumbbell", "🏋️ Free Weights & Home Gym"),
+            Triple("Barbell", "Barbell", "🏋️‍♂️ Compound Strength Lifts"),
+            Triple("Cable Machine", "Cable Machine", "⚙️ Constant Tension Isolation"),
+            Triple("Smith Machine", "Smith Machine", "🔩 Guided Bar Squats & Presses"),
+            Triple("All", "All Equipment (Full Gym)", "🌐 Show All Available Exercises")
+        )
+
+        equipmentOptions.forEach { (eqKey, eqTitle, eqSub) ->
+            val isSel = selectedEquipmentFilter == eqKey
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = if (isSel) {
+                    createGlassDrawable("#1E293B", "#34D399", 28f)
+                } else {
+                    createGlassDrawable("#090F1D", "#1E293B", 28f)
+                }
+                setPadding(28, 22, 28, 22)
+                val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                p.setMargins(0, 0, 0, 12)
+                layoutParams = p
+                setOnClickListener {
+                    selectedEquipmentFilter = eqKey
+                    selectedSplitFilter = "All"
+                    renderWorkoutStudioTab()
+                }
+            }
+
+            val radioCircle = TextView(this).apply {
+                text = if (isSel) "🔘" else "⚪"
+                textSize = 16f
+                setPadding(0, 0, 22, 0)
+            }
+
+            val textCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            textCol.addView(TextView(this).apply {
+                text = eqTitle
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                setTypeface(null, Typeface.BOLD)
+            })
+            textCol.addView(TextView(this).apply {
+                text = eqSub
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 11.5f
+            })
+
+            row.addView(radioCircle)
+            row.addView(textCol)
+            equipCard.addView(row)
+        }
+        workoutContentContainer.addView(equipCard)
+
+        // Step 2: Interactive Muscle Map + Gym Workout Trainer Banners (Screenshots 1, 2, 3 Style)
+        val muscleCard = createGlassCard("#10192D", "#EF4444")
+        muscleCard.addView(createSectionLabel("STEP 2: SELECT FOCUS AREA (TAP BODY MAP OR MUSCLE BANNER)"))
+
+        val interactiveBodyMap = MuscleBodyMapView(this, selectedMuscleFilter) { tappedMuscle ->
+            selectedMuscleFilter = tappedMuscle
+            selectedSplitFilter = "All"
+            renderWorkoutStudioTab()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 340).apply {
+                setMargins(0, 10, 0, 18)
+            }
+        }
+        muscleCard.addView(interactiveBodyMap)
+
+        val muscleBanners = listOf(
+            Triple("Chest", "CHEST", "Pectorals • Push-ups, Bench & Incline Press"),
+            Triple("Abs", "ABS & CORE", "Six-Pack & Obliques • Ab Wheel, Planks & Twists"),
+            Triple("Arms", "ARMS", "Biceps & Triceps • Dumbbell Curls & Pushdowns"),
+            Triple("Back", "BACK", "Lats & Traps • Barbell Rows, Pulldowns & Deadlifts"),
+            Triple("Shoulders", "SHOULDERS", "Deltoids • Overhead Press & Lateral Raises"),
+            Triple("Legs", "LEGS & GLUTES", "Quads & Hamstrings • Squats & Backward Lunges"),
+            Triple("All", "FULL BODY (ALL)", "Show All Target Muscle Groups")
+        )
+
+        muscleBanners.forEach { (mKey, mTitle, mDesc) ->
+            val isSel = selectedMuscleFilter == mKey
+            val banner = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = if (isSel) {
+                    createGlassDrawable("#B91C1C", "#FCA5A5", 26f)
+                } else {
+                    createGlassDrawable("#18181B", "#DC2626", 26f)
+                }
+                setPadding(30, 24, 26, 24)
+                val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                p.setMargins(0, 0, 0, 12)
+                layoutParams = p
+                setOnClickListener {
+                    selectedMuscleFilter = mKey
+                    selectedSplitFilter = "All"
+                    renderWorkoutStudioTab()
+                }
+            }
+
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            col.addView(TextView(this).apply {
+                text = mTitle
+                setTextColor(Color.WHITE)
+                textSize = 18f
+                setTypeface(null, Typeface.BOLD)
+            })
+            col.addView(TextView(this).apply {
+                text = mDesc
+                setTextColor(Color.parseColor("#FECACA"))
+                textSize = 11.5f
+                setPadding(0, 4, 0, 0)
+            })
+
+            val badge = TextView(this).apply {
+                text = if (isSel) "✓ SELECTED" else "SELECT ›"
+                setTextColor(Color.WHITE)
+                textSize = 11.5f
+                setTypeface(null, Typeface.BOLD)
+            }
+
+            banner.addView(col)
+            banner.addView(badge)
+            muscleCard.addView(banner)
+        }
+
+        val matchingCount = getFullExerciseCatalog().count { ex ->
+            (selectedMuscleFilter == "All" || ex.muscle.equals(selectedMuscleFilter, true) || ex.secondaryMuscles.contains(selectedMuscleFilter, true)) &&
+            (selectedEquipmentFilter == "All" || ex.equipment.equals(selectedEquipmentFilter, true))
+        }
+
+        val btnFinishGenerator = Button(this).apply {
+            text = "FINISH • LAUNCH $matchingCount MATCHING EXERCISES"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            background = createGlassDrawable("#059669", "#34D399", 30f)
+            setPadding(24, 20, 24, 20)
+            val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            p.setMargins(0, 12, 0, 0)
+            layoutParams = p
+            setOnClickListener {
+                workoutSubTab = 0
+                renderWorkoutStudioTab()
+            }
+        }
+        muscleCard.addView(btnFinishGenerator)
+        workoutContentContainer.addView(muscleCard)
+    }
+
+    // ----------------------------------------------------
+    // SUB-TAB 2: CUSTOMIZE EXERCISE & VIDEO CATALOG (SCREENSHOT 6)
+    // ----------------------------------------------------
+    private fun renderExerciseLibrarySubTab() {
+        val searchCard = createGlassCard("#10192D", "#2A4365")
+        searchCard.addView(createSectionLabel("SMART SEARCH & CUSTOMIZE EXERCISE CATALOG"))
+
+        val searchRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 4, 0, 14)
+        }
+
+        val inputSearch = EditText(this).apply {
+            hint = "🔍 Search (e.g. Row, Push-up, Ab Wheel, Barbell)..."
+            setText(exerciseSearchQuery)
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#64748B"))
+            textSize = 13f
+            background = createGlassDrawable("#090F1D", "#1E293B", 24f)
+            setPadding(28, 18, 28, 18)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val btnSearchGo = Button(this).apply {
+            text = "Search"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            background = createGlassDrawable("#0284C7", "#38BDF8", 24f)
+            val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            p.setMargins(10, 0, 0, 0)
+            layoutParams = p
+            setOnClickListener {
+                exerciseSearchQuery = inputSearch.text.toString().trim()
+                renderWorkoutStudioTab()
+            }
+        }
+
+        searchRow.addView(inputSearch)
+        searchRow.addView(btnSearchGo)
+        searchCard.addView(searchRow)
+
+        val btnAddCustomEx = createActionButton("+ Create Custom Exercise & Add to Library", "#4F46E5", "#818CF8") {
+            showAddCustomExerciseDialog()
+        }
+        searchCard.addView(btnAddCustomEx)
+        workoutContentContainer.addView(searchCard)
+
+        val allExercises = getFullExerciseCatalog().filter { ex ->
+            exerciseSearchQuery.isEmpty() ||
+            ex.name.contains(exerciseSearchQuery, true) ||
+            ex.muscle.contains(exerciseSearchQuery, true) ||
+            ex.equipment.contains(exerciseSearchQuery, true)
+        }
+
+        allExercises.forEach { ex ->
+            val isPinned = expandedExerciseIds.contains(ex.id)
+            val rowCard = createGlassCard("#10192D", if (isPinned) "#34D399" else "#1E293B").apply {
+                setPadding(26, 22, 26, 22)
+            }
+
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+
+            val checkIcon = TextView(this).apply {
+                text = if (isPinned) "☑️" else "⚪"
+                textSize = 18f
+                setPadding(0, 0, 18, 0)
+                setOnClickListener {
+                    if (isPinned) expandedExerciseIds.remove(ex.id) else expandedExerciseIds.add(ex.id)
+                    renderWorkoutStudioTab()
+                }
+            }
+
+            val animMini = ExerciseAnimView(this, ex.animType).apply {
+                layoutParams = LinearLayout.LayoutParams(120, 120).apply { setMargins(0, 0, 18, 0) }
+                setOnClickListener { showExerciseVideoGuideDialog(ex) }
+            }
+
+            val infoCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { showExerciseVideoGuideDialog(ex) }
+            }
+
+            infoCol.addView(TextView(this).apply {
+                text = ex.name
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                setTypeface(null, Typeface.BOLD)
+            })
+            infoCol.addView(TextView(this).apply {
+                text = "${ex.muscle}  •  ${ex.equipment}"
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 12f
+                setPadding(0, 4, 0, 0)
+            })
+
+            val btnGuide = createMiniTagButton("🎬 Guide", "#DC2626", "#F87171", "#FFFFFF") {
+                showExerciseVideoGuideDialog(ex)
+            }
+
+            row.addView(checkIcon)
+            row.addView(animMini)
+            row.addView(infoCol)
+            row.addView(btnGuide)
+            if (ex.isCustom) {
+                row.addView(createMiniTagButton("✕", "#450A0A", "#EF4444", "#FCA5A5") {
+                    deleteCustomExercise(ex.id)
+                })
+            }
+
+            rowCard.addView(row)
+            workoutContentContainer.addView(rowCard)
+        }
+
+        val btnLaunchSelected = createActionButton("🏋️ Train Selected Exercises (${expandedExerciseIds.size} Expanded)", "#059669", "#34D399") {
+            workoutSubTab = 0
+            renderWorkoutStudioTab()
+        }
+        workoutContentContainer.addView(btnLaunchSelected)
+    }
+
+    // ----------------------------------------------------
+    // SUB-TAB 3: FITNESS TRACKER SMART REPORT (SCREENSHOT 2)
+    // ----------------------------------------------------
+    private fun renderFitnessReportSubTab() {
+        val workoutsDone = prefs.getInt("workouts_completed", 0)
+        val workoutMins = prefs.getInt("workout_minutes", 0)
+        val totalVolumeKg = calculateTotalVolumeKg()
+
+        val reportCard = createGlassCard("#10192D", "#EF4444")
+        reportCard.addView(createSectionLabel("FITNESS TRACKER SMART • WEEKLY CALENDAR & VOLUME"))
+
+        // 7-Day Calendar Strip (Sun..Sat with Today highlighted like Screenshot 2)
+        val calRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 6, 0, 20)
+        }
+        val cal = Calendar.getInstance()
+        val todayDayOfWeek = cal.get(Calendar.DAY_OF_WEEK) // 1=Sun .. 7=Sat
+        val dayNames = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+        for (d in 1..7) {
+            val isToday = d == todayDayOfWeek
+            val dayCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            dayCol.addView(TextView(this).apply {
+                text = dayNames[d - 1]
+                setTextColor(if (isToday) Color.parseColor("#38BDF8") else Color.parseColor("#94A3B8"))
+                textSize = 11f
+                setTypeface(null, Typeface.BOLD)
+            })
+            val dayNum = (cal.get(Calendar.DAY_OF_MONTH) - (todayDayOfWeek - d)).coerceAtLeast(1)
+            dayCol.addView(TextView(this).apply {
+                text = "$dayNum"
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                textSize = 12.5f
+                setTypeface(null, Typeface.BOLD)
+                background = if (isToday) createGlassDrawable("#DC2626", "#F87171", 40f) else createGlassDrawable("#1E293B", "#334155", 40f)
+                setPadding(18, 12, 18, 12)
+                val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                p.setMargins(0, 6, 0, 0)
+                layoutParams = p
+            })
+            calRow.addView(dayCol)
+        }
+        reportCard.addView(calRow)
+
+        val metricsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            background = createGlassDrawable("#090F1D", "#1E293B", 24f)
+            setPadding(20, 22, 20, 22)
+        }
+        metricsRow.addView(createStatColumn("$workoutsDone", "Workouts", "#F8FAFC"))
+        metricsRow.addView(createStatColumn("$workoutMins", "Time (min)", "#38BDF8"))
+        metricsRow.addView(createStatColumn("$totalVolumeKg", "Volume (kg)", "#F43F5E"))
+        reportCard.addView(metricsRow)
+
+        val bodyMapView = MuscleBodyMapView(this, selectedMuscleFilter) { tapped ->
+            selectedMuscleFilter = tapped
+            renderWorkoutStudioTab()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 330).apply {
+                setMargins(0, 20, 0, 8)
+            }
+        }
+        reportCard.addView(bodyMapView)
+        workoutContentContainer.addView(reportCard)
+
+        // Custom Workout Logger & Undo History Card
         val historyCard = createGlassCard("#10192D", "#F59E0B")
         historyCard.addView(createSectionLabel("WORKOUT SESSION LOGGER & UNDO HISTORY"))
 
-        val btnCustomWorkout = createActionButton("+ Log Custom Workout Session", "#B45309", "#F59E0B") {
+        historyCard.addView(createActionButton("+ Log Custom Workout Session", "#B45309", "#F59E0B") {
             showCustomWorkoutDialog()
-        }
-        historyCard.addView(btnCustomWorkout)
+        })
 
         val workoutLogs = JSONArray(prefs.getString("workout_logs_json", "[]"))
         if (workoutLogs.length() > 0) {
             historyCard.addView(TextView(this).apply {
-                text = "RECENT LOGGED SESSIONS (TAP ✕ UNDO TO CANCEL ACCIDENTAL CLICKS)"
+                text = "RECENT LOGGED SESSIONS (TAP ✕ UNDO TO CANCEL MISTAKES)"
                 setTextColor(Color.parseColor("#94A3B8"))
                 textSize = 11f
                 setTypeface(null, Typeface.BOLD)
@@ -1647,15 +2217,168 @@ class MainActivity : AppCompatActivity() {
         workoutContentContainer.addView(historyCard)
     }
 
+    // ----------------------------------------------------
+    // 99+ VIDEO FITNESS GUIDE MODAL (SCREENSHOT 4: MUSCLE | HOW TO DO)
+    // ----------------------------------------------------
+    private fun showExerciseVideoGuideDialog(ex: ExerciseMeta) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0B1324"))
+            setPadding(40, 36, 40, 32)
+        }
+
+        // Top Floating White/Glass Title Pill (Screenshot 4 Style)
+        val tvTitlePill = TextView(this).apply {
+            text = "🎬  ${ex.name}"
+            setTextColor(Color.WHITE)
+            textSize = 16.5f
+            setTypeface(null, Typeface.BOLD)
+            background = createGlassDrawable("#1E293B", "#38BDF8", 28f)
+            setPadding(32, 16, 32, 16)
+            val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            p.setMargins(0, 0, 0, 18)
+            layoutParams = p
+        }
+        container.addView(tvTitlePill)
+
+        // Large Dual-Pose Animated Biomechanics Canvas
+        val bigAnimPlayer = ExerciseAnimView(this, ex.animType).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 360).apply {
+                setMargins(0, 0, 0, 18)
+            }
+        }
+        container.addView(bigAnimPlayer)
+
+        // Segmented Toggle: [ Muscle ] | [ How To Do ] (Screenshot 4 Style)
+        val toggleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = createGlassDrawable("#1E293B", "#334155", 32f)
+            setPadding(8, 8, 8, 8)
+            val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            p.setMargins(0, 0, 0, 18)
+            layoutParams = p
+        }
+
+        val dynamicDetailBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        lateinit var btnMuscleTab: Button
+        lateinit var btnHowToTab: Button
+
+        fun renderModalTab(tabIdx: Int) {
+            dynamicDetailBox.removeAllViews()
+            if (tabIdx == 0) {
+                btnMuscleTab.background = createGlassDrawable("#090F1D", "#38BDF8", 28f)
+                btnMuscleTab.setTextColor(Color.WHITE)
+                btnHowToTab.background = createGlassDrawable("#1E293B", "#1E293B", 28f)
+                btnHowToTab.setTextColor(Color.parseColor("#94A3B8"))
+
+                dynamicDetailBox.addView(TextView(this).apply {
+                    text = "Focus Area:  • ${ex.secondaryMuscles.replace("•", "  • ")}"
+                    setTextColor(Color.parseColor("#F87171"))
+                    textSize = 13f
+                    setTypeface(null, Typeface.BOLD)
+                    setPadding(0, 0, 0, 12)
+                })
+                dynamicDetailBox.addView(MuscleBodyMapView(this, ex.muscle).apply {
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 300)
+                })
+                dynamicDetailBox.addView(TextView(this).apply {
+                    text = "🏋️ Equipment Required: ${ex.equipment}"
+                    setTextColor(Color.parseColor("#38BDF8"))
+                    textSize = 12.5f
+                    setTypeface(null, Typeface.BOLD)
+                    setPadding(0, 10, 0, 14)
+                })
+            } else {
+                btnHowToTab.background = createGlassDrawable("#090F1D", "#38BDF8", 28f)
+                btnHowToTab.setTextColor(Color.WHITE)
+                btnMuscleTab.background = createGlassDrawable("#1E293B", "#1E293B", 28f)
+                btnMuscleTab.setTextColor(Color.parseColor("#94A3B8"))
+
+                dynamicDetailBox.addView(TextView(this).apply {
+                    text = "📋 STEP-BY-STEP EXECUTION:\n${ex.howToSteps}\n\n💡 PRO BIOMECHANICS TIP:\n${ex.proTips}"
+                    setTextColor(Color.parseColor("#E2E8F0"))
+                    textSize = 13f
+                    setLineSpacing(6f, 1.12f)
+                    setPadding(0, 4, 0, 16)
+                })
+            }
+        }
+
+        btnMuscleTab = Button(this).apply {
+            text = "Muscle"
+            isAllCaps = false
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { renderModalTab(0) }
+        }
+        btnHowToTab = Button(this).apply {
+            text = "How To Do"
+            isAllCaps = false
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { renderModalTab(1) }
+        }
+
+        toggleRow.addView(btnMuscleTab)
+        toggleRow.addView(btnHowToTab)
+        container.addView(toggleRow)
+        container.addView(dynamicDetailBox)
+        renderModalTab(0)
+
+        val btnWatchOnlineVideo = createActionButton("📹 Watch HD Video Demo (Workout.Cool / YouTube)", "#DC2626", "#F87171") {
+            val query = Uri.encode("${ex.name.replace("*", "")} proper form exercise demonstration")
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$query")))
+        }
+        container.addView(btnWatchOnlineVideo)
+
+        AlertDialog.Builder(this)
+            .setView(container)
+            .setPositiveButton("Done", null)
+            .show()
+    }
+
+    private fun toggleWorkoutStopwatch() {
+        if (isWorkoutStopwatchRunning) {
+            workoutStopwatchTimer?.cancel()
+            isWorkoutStopwatchRunning = false
+            Toast.makeText(this, "⏸️ Workout Stopwatch Paused", Toast.LENGTH_SHORT).show()
+        } else {
+            isWorkoutStopwatchRunning = true
+            workoutStopwatchTimer = object : CountDownTimer(3 * 3600 * 1000L, 1000L) {
+                override fun onTick(millisUntilFinished: Long) {
+                    workoutElapsedSeconds++
+                    tvWorkoutStopwatch?.text = String.format(
+                        Locale.getDefault(),
+                        "⏱️ %02d:%02d",
+                        workoutElapsedSeconds / 60,
+                        workoutElapsedSeconds % 60
+                    )
+                }
+                override fun onFinish() {}
+            }.start()
+        }
+    }
+
+    private fun stopWorkoutStopwatch() {
+        workoutStopwatchTimer?.cancel()
+        isWorkoutStopwatchRunning = false
+        workoutElapsedSeconds = 0
+    }
+
     private fun startRestTimer(seconds: Int) {
         restCountDownTimer?.cancel()
-        restTimeLeftSeconds = seconds
-        restCountDownTimer = object : CountDownTimer(seconds * 1000L, 1000L) {
+        restTimeLeftSeconds = seconds.coerceAtLeast(5)
+        restCountDownTimer = object : CountDownTimer(restTimeLeftSeconds * 1000L, 1000L) {
             override fun onTick(millisUntilFinished: Long) {
                 restTimeLeftSeconds = (millisUntilFinished / 1000L).toInt()
                 tvRestTimerStatus?.text = String.format(
                     Locale.getDefault(),
-                    "🟢 RESTING: %02d:%02d",
+                    "🟢 REST TIMER: %02d:%02d",
                     restTimeLeftSeconds / 60,
                     restTimeLeftSeconds % 60
                 )
@@ -1677,7 +2400,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAddCustomExerciseDialog() {
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(50, 32, 50, 16) }
-        val inputName = EditText(this).apply { hint = "Exercise Name (e.g., Incline Dumbbell Press)" }
+        val inputName = EditText(this).apply { hint = "Exercise Name (e.g., Preacher Curl * EZ Bar)" }
         val inputMuscle = EditText(this).apply {
             hint = "Target Muscle (Chest / Back / Arms / Abs / Shoulders / Legs)"
             setText(if (selectedMuscleFilter == "All") "Chest" else selectedMuscleFilter)
@@ -1691,9 +2414,9 @@ class MainActivity : AppCompatActivity() {
         layout.addView(inputName); layout.addView(inputMuscle); layout.addView(inputEquip); layout.addView(inputSteps)
 
         AlertDialog.Builder(this)
-            .setTitle("➕ Add Custom Exercise")
+            .setTitle("➕ Create Custom Exercise")
             .setView(layout)
-            .setPositiveButton("Add Exercise") { _, _ ->
+            .setPositiveButton("Save Exercise") { _, _ ->
                 val name = inputName.text.toString().trim()
                 if (name.isNotEmpty()) {
                     val arr = JSONArray(prefs.getString("custom_exercises_json", "[]"))
@@ -1708,6 +2431,7 @@ class MainActivity : AppCompatActivity() {
                             .put("animType", 0)
                     )
                     prefs.edit().putString("custom_exercises_json", arr.toString()).apply()
+                    expandedExerciseIds.add(id)
                     renderWorkoutStudioTab()
                 }
             }
@@ -1731,6 +2455,7 @@ class MainActivity : AppCompatActivity() {
         return JSONArray().apply {
             put(JSONObject().put("kg", 20).put("reps", 12).put("done", true))
             put(JSONObject().put("kg", 25).put("reps", 12).put("done", false))
+            put(JSONObject().put("kg", 30).put("reps", 12).put("done", false))
             put(JSONObject().put("kg", 30).put("reps", 10).put("done", false))
         }
     }
@@ -1780,60 +2505,6 @@ class MainActivity : AppCompatActivity() {
                 renderWorkoutStudioTab()
             }
             .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showExerciseVideoGuideDialog(ex: ExerciseMeta) {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#0B1324"))
-            setPadding(44, 40, 44, 36)
-        }
-
-        val tvTitle = TextView(this).apply {
-            text = "🎬 ${ex.name}"
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, 0, 0, 14)
-        }
-
-        val bigAnimPlayer = ExerciseAnimView(this, ex.animType).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 380).apply {
-                setMargins(0, 0, 0, 18)
-            }
-        }
-
-        val tvFocusArea = TextView(this).apply {
-            text = "🎯 Focus Area: ${ex.secondaryMuscles}\n🏋️ Equipment: ${ex.equipment}"
-            setTextColor(Color.parseColor("#F87171"))
-            textSize = 13f
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, 0, 0, 14)
-        }
-
-        val tvSteps = TextView(this).apply {
-            text = "📋 HOW TO DO:\n${ex.howToSteps}"
-            setTextColor(Color.parseColor("#E2E8F0"))
-            textSize = 13f
-            setLineSpacing(6f, 1.1f)
-            setPadding(0, 0, 0, 20)
-        }
-
-        val btnWatchOnlineVideo = createActionButton("📹 Watch HD Video Tutorial (Workout.Cool / YT)", "#DC2626", "#F87171") {
-            val query = Uri.encode("${ex.name} proper form exercise demonstration")
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$query")))
-        }
-
-        container.addView(tvTitle)
-        container.addView(bigAnimPlayer)
-        container.addView(tvFocusArea)
-        container.addView(tvSteps)
-        container.addView(btnWatchOnlineVideo)
-
-        AlertDialog.Builder(this)
-            .setView(container)
-            .setPositiveButton("Done", null)
             .show()
     }
 
@@ -1945,11 +2616,9 @@ class MainActivity : AppCompatActivity() {
         shieldCard.addView(btnOpenAppInfo)
         tabShieldContainer.addView(shieldCard)
 
-        // Custom Installed App & Game Blocker Card
         customBlockedAppsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         tabShieldContainer.addView(customBlockedAppsContainer)
 
-        // Backup & Restore Progress Card
         val backupCard = createGlassCard("#10192D", "#10B981")
         backupCard.addView(createSectionLabel("💾 CLOUD / CLIPBOARD DATA BACKUP & RESTORE"))
         backupCard.addView(TextView(this).apply {
@@ -2399,7 +3068,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ====================================================
-    // UI HELPERS & CUSTOM CANVAS VIEWS
+    // UI HELPERS & CUSTOM INTERACTIVE CANVAS VIEWS
     // ====================================================
     private fun createStatColumn(value: String, label: String, colorHex: String): LinearLayout {
         return LinearLayout(this).apply {
@@ -2452,9 +3121,9 @@ class MainActivity : AppCompatActivity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = createGlassDrawable(fillHex, strokeHex, 36f)
-            setPadding(36, 36, 36, 36)
+            setPadding(34, 34, 34, 34)
             val params = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            params.setMargins(0, 0, 0, 30)
+            params.setMargins(0, 0, 0, 28)
             layoutParams = params
         }
     }
@@ -2498,12 +3167,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    class MuscleBodyMapView(context: Context, private val activeMuscle: String) : View(context) {
+    // Interactive Tappable Front & Back Anatomical Muscle Map (Screenshots 2, 3, 4 Style)
+    class MuscleBodyMapView(
+        context: Context,
+        private val activeMuscle: String,
+        private val onMuscleTapped: ((String) -> Unit)? = null
+    ) : View(context) {
         private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#334155") }
         private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#EF4444") }
+        private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#B91C1C") }
         private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#E2E8F0")
-            textSize = 26f
+            textSize = 24f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        private val tagTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 21f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
@@ -2513,35 +3194,77 @@ class MainActivity : AppCompatActivity() {
             return if (groups.any { it.equals(activeMuscle, true) }) highlightPaint else basePaint
         }
 
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (event.action == MotionEvent.ACTION_DOWN && onMuscleTapped != null) {
+                val x = event.x
+                val y = event.y
+                val w = width.toFloat()
+                val tapped = if (x < w * 0.5f) {
+                    when {
+                        y < 125f -> "Shoulders"
+                        y < 158f && x > w * 0.18f && x < w * 0.38f -> "Chest"
+                        y < 210f && (x <= w * 0.18f || x >= w * 0.38f) -> "Arms"
+                        y < 215f -> "Abs"
+                        else -> "Legs"
+                    }
+                } else {
+                    when {
+                        y < 188f -> "Back"
+                        y < 220f -> "Core"
+                        else -> "Legs"
+                    }
+                }
+                onMuscleTapped.invoke(tapped)
+                return true
+            }
+            return super.onTouchEvent(event)
+        }
+
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val w = width.toFloat()
             val frontCx = w * 0.28f
             val backCx = w * 0.72f
 
-            canvas.drawText("FRONT MUSCLE MAP", frontCx, 30f, labelPaint)
-            canvas.drawText("BACK MUSCLE MAP", backCx, 30f, labelPaint)
+            canvas.drawText("FRONT (TAP MUSCLE)", frontCx, 28f, labelPaint)
+            canvas.drawText("BACK (TAP MUSCLE)", backCx, 28f, labelPaint)
 
-            canvas.drawCircle(frontCx, 72f, 22f, basePaint)
-            canvas.drawRoundRect(frontCx - 48f, 100f, frontCx + 48f, 125f, 12f, 12f, paintFor("Shoulders"))
-            canvas.drawRoundRect(frontCx - 34f, 108f, frontCx + 34f, 152f, 10f, 10f, paintFor("Chest"))
-            canvas.drawRoundRect(frontCx - 26f, 156f, frontCx + 26f, 212f, 8f, 8f, paintFor("Abs", "Core"))
-            canvas.drawRoundRect(frontCx - 56f, 126f, frontCx - 38f, 198f, 10f, 10f, paintFor("Arms"))
-            canvas.drawRoundRect(frontCx + 38f, 126f, frontCx + 56f, 198f, 10f, 10f, paintFor("Arms"))
-            canvas.drawRoundRect(frontCx - 30f, 218f, frontCx - 8f, 308f, 10f, 10f, paintFor("Legs"))
-            canvas.drawRoundRect(frontCx + 8f, 218f, frontCx + 30f, 308f, 10f, 10f, paintFor("Legs"))
+            // Front Figure
+            canvas.drawCircle(frontCx, 68f, 20f, basePaint)
+            canvas.drawRoundRect(frontCx - 48f, 96f, frontCx + 48f, 122f, 12f, 12f, paintFor("Shoulders"))
+            canvas.drawRoundRect(frontCx - 34f, 106f, frontCx + 34f, 150f, 10f, 10f, paintFor("Chest"))
+            canvas.drawRoundRect(frontCx - 26f, 154f, frontCx + 26f, 210f, 8f, 8f, paintFor("Abs", "Core"))
+            canvas.drawRoundRect(frontCx - 56f, 124f, frontCx - 38f, 196f, 10f, 10f, paintFor("Arms"))
+            canvas.drawRoundRect(frontCx + 38f, 124f, frontCx + 56f, 196f, 10f, 10f, paintFor("Arms"))
+            canvas.drawRoundRect(frontCx - 30f, 216f, frontCx - 8f, 304f, 10f, 10f, paintFor("Legs"))
+            canvas.drawRoundRect(frontCx + 8f, 216f, frontCx + 30f, 304f, 10f, 10f, paintFor("Legs"))
 
-            canvas.drawCircle(backCx, 72f, 22f, basePaint)
-            canvas.drawRoundRect(backCx - 48f, 100f, backCx + 48f, 125f, 12f, 12f, paintFor("Shoulders"))
-            canvas.drawRoundRect(backCx - 36f, 112f, backCx + 36f, 185f, 12f, 12f, paintFor("Back"))
-            canvas.drawRoundRect(backCx - 28f, 188f, backCx + 28f, 218f, 10f, 10f, paintFor("Core", "Legs"))
-            canvas.drawRoundRect(backCx - 56f, 126f, backCx - 38f, 198f, 10f, 10f, paintFor("Arms"))
-            canvas.drawRoundRect(backCx + 38f, 126f, backCx + 56f, 198f, 10f, 10f, paintFor("Arms"))
-            canvas.drawRoundRect(backCx - 30f, 222f, backCx - 8f, 308f, 10f, 10f, paintFor("Legs"))
-            canvas.drawRoundRect(backCx + 8f, 222f, backCx + 30f, 308f, 10f, 10f, paintFor("Legs"))
+            // Back Figure
+            canvas.drawCircle(backCx, 68f, 20f, basePaint)
+            canvas.drawRoundRect(backCx - 48f, 96f, backCx + 48f, 122f, 12f, 12f, paintFor("Shoulders"))
+            canvas.drawRoundRect(backCx - 36f, 110f, backCx + 36f, 184f, 12f, 12f, paintFor("Back"))
+            canvas.drawRoundRect(backCx - 28f, 188f, backCx + 28f, 216f, 10f, 10f, paintFor("Core", "Legs"))
+            canvas.drawRoundRect(backCx - 56f, 124f, backCx - 38f, 196f, 10f, 10f, paintFor("Arms"))
+            canvas.drawRoundRect(backCx + 38f, 124f, backCx + 56f, 196f, 10f, 10f, paintFor("Arms"))
+            canvas.drawRoundRect(backCx - 30f, 220f, backCx - 8f, 304f, 10f, 10f, paintFor("Legs"))
+            canvas.drawRoundRect(backCx + 8f, 220f, backCx + 30f, 304f, 10f, 10f, paintFor("Legs"))
+
+            // Red Callout Pills (Screenshot 2 Style: Arm, Abs, Back, Leg)
+            canvas.drawRoundRect(16f, 132f, 104f, 166f, 18f, 18f, badgePaint)
+            canvas.drawText("Arm", 60f, 156f, tagTextPaint)
+
+            canvas.drawRoundRect(16f, 178f, 104f, 212f, 18f, 18f, badgePaint)
+            canvas.drawText("Abs", 60f, 202f, tagTextPaint)
+
+            canvas.drawRoundRect(w - 108f, 122f, w - 16f, 156f, 18f, 18f, badgePaint)
+            canvas.drawText("Back", w - 62f, 146f, tagTextPaint)
+
+            canvas.drawRoundRect(w - 108f, 240f, w - 16f, 274f, 18f, 18f, badgePaint)
+            canvas.drawText("Leg", w - 62f, 264f, tagTextPaint)
         }
     }
 
+    // Live Animated Exercise Visual Player (Demonstrates Rep Mechanics in Real Time)
     class ExerciseAnimView(context: Context, private val animType: Int) : View(context) {
         private var phase = 0f
         private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#162238") }
@@ -2709,5 +3432,6 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         countDownTimer?.cancel()
         restCountDownTimer?.cancel()
+        workoutStopwatchTimer?.cancel()
     }
 }
