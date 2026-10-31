@@ -2,6 +2,8 @@ package com.focusforge.pro
 
 import android.animation.ValueAnimator
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -43,9 +45,11 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var prefs: SharedPreferences
     private var countDownTimer: CountDownTimer? = null
+    private var restCountDownTimer: CountDownTimer? = null
     private var isTimerRunning = false
     private var initialTimeMillis: Long = 45 * 60 * 1000L
     private var timeLeftInMillis: Long = initialTimeMillis
+    private var restTimeLeftSeconds: Int = 0
     private var selectedSubject = "CA Found: Business Laws"
     private var selectedCourseFilter = "All"
     private var selectedMuscleFilter = "All"
@@ -75,9 +79,12 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var courseFilterRow: LinearLayout
     private lateinit var syllabusListContainer: LinearLayout
+    private lateinit var formulaVaultContainer: LinearLayout
     private lateinit var consistencyContentContainer: LinearLayout
     private lateinit var workoutContentContainer: LinearLayout
+    private lateinit var customBlockedAppsContainer: LinearLayout
     private lateinit var btnBlockerToggle: Button
+    private var tvRestTimerStatus: TextView? = null
 
     data class ExerciseMeta(
         val id: String,
@@ -86,10 +93,11 @@ class MainActivity : AppCompatActivity() {
         val secondaryMuscles: String,
         val equipment: String,
         val animType: Int,
-        val howToSteps: String
+        val howToSteps: String,
+        val isCustom: Boolean = false
     )
 
-    private val exerciseCatalog = listOf(
+    private val defaultExerciseCatalog = listOf(
         ExerciseMeta(
             "row_bb", "Bent-Over Row • Barbell", "Back", "Back • Arms • Core", "Barbell", 1,
             "1. Stand with feet shoulder-width apart, knees slightly bent.\n2. Hinge forward at hips keeping back flat.\n3. Pull barbell toward lower chest/upper abs, squeezing shoulder blades.\n4. Lower slowly under control."
@@ -593,7 +601,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ====================================================
-    // TAB 2: CA (FOUND / INTER / FINAL) & B.COM SYLLABUS
+    // TAB 2: CA (FOUND / INTER / FINAL) & B.COM SYLLABUS + VAULT
     // ====================================================
     private fun buildSyllabusTab() {
         val topHeaderCard = createGlassCard("#10192D", "#2A4365")
@@ -624,12 +632,16 @@ class MainActivity : AppCompatActivity() {
 
         syllabusListContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         tabSyllabusContainer.addView(syllabusListContainer)
+
+        formulaVaultContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        tabSyllabusContainer.addView(formulaVaultContainer)
     }
 
     private fun renderSyllabusCards() {
         syllabusListContainer.removeAllViews()
         subjectChipRow.removeAllViews()
         courseFilterRow.removeAllViews()
+        formulaVaultContainer.removeAllViews()
 
         val levels = listOf("All", "CA Foundation", "CA Inter", "CA Final", "B.Com")
         levels.forEach { lvl ->
@@ -814,6 +826,72 @@ class MainActivity : AppCompatActivity() {
             card.addView(btnAddUnit)
             syllabusListContainer.addView(card)
         }
+
+        // Render CA Law Sections, AS & Formula Quick-Vault Card
+        val vaultCard = createGlassCard("#10192D", "#8B5CF6")
+        vaultCard.addView(createSectionLabel("📝 CA & B.COM LAW SECTIONS, AS & FORMULA QUICK-VAULT"))
+
+        val notesArr = JSONArray(prefs.getString("QuickVault_json", "[]"))
+        for (n in 0 until notesArr.length()) {
+            val noteObj = notesArr.getJSONObject(n)
+            val tag = noteObj.optString("tag", "Law / Formula")
+            val body = noteObj.optString("body", "")
+
+            val noteRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = createGlassDrawable("#090F1D", "#2E1065", 20f)
+                setPadding(22, 18, 18, 18)
+                val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                p.setMargins(0, 0, 0, 12)
+                layoutParams = p
+            }
+
+            noteRow.addView(TextView(this).apply {
+                text = "📌 [$tag]\n$body"
+                setTextColor(Color.parseColor("#E2E8F0"))
+                textSize = 12.5f
+                setLineSpacing(4f, 1.1f)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+
+            noteRow.addView(createMiniTagButton("✕", "#450A0A", "#EF4444", "#FCA5A5") {
+                notesArr.remove(n)
+                prefs.edit().putString("QuickVault_json", notesArr.toString()).apply()
+                renderSyllabusCards()
+            })
+
+            vaultCard.addView(noteRow)
+        }
+
+        vaultCard.addView(createActionButton("+ Add Law Section / AS / Formula Note", "#4C1D95", "#8B5CF6") {
+            showAddVaultNoteDialog()
+        })
+        formulaVaultContainer.addView(vaultCard)
+    }
+
+    private fun showAddVaultNoteDialog() {
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(50, 32, 50, 16) }
+        val inputTag = EditText(this).apply { hint = "Topic Tag (e.g., Contract Act Sec 10 / AS 2 / Costing)" }
+        val inputBody = EditText(this).apply { hint = "Section Rule or Formula to Remember" }
+        layout.addView(inputTag); layout.addView(inputBody)
+
+        AlertDialog.Builder(this)
+            .setTitle("📝 Add Quick Revision Note")
+            .setView(layout)
+            .setPositiveButton("Save Note") { _, _ ->
+                val tag = inputTag.text.toString().trim().ifEmpty { "CA / B.Com Note" }
+                val body = inputBody.text.toString().trim()
+                if (body.isNotEmpty()) {
+                    val arr = JSONArray(prefs.getString("QuickVault_json", "[]"))
+                    arr.put(JSONObject().put("tag", tag).put("body", body))
+                    prefs.edit().putString("QuickVault_json", arr.toString()).apply()
+                    addXp(15, "Revision Note Added! (+15 XP)")
+                    renderSyllabusCards()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showAddSubjectDialog() {
@@ -1170,11 +1248,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ====================================================
-    // TAB 4: 🏋️ WORKOUT STUDIO (WORKOUT.COOL & SCREENSHOT SUITE)
+    // TAB 4: 🏋️ WORKOUT STUDIO (REST TIMER + CUSTOM EXERCISE + SETS)
     // ====================================================
     private fun buildWorkoutStudioTab() {
         workoutContentContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         tabWorkoutContainer.addView(workoutContentContainer)
+    }
+
+    private fun getFullExerciseCatalog(): List<ExerciseMeta> {
+        val list = mutableListOf<ExerciseMeta>()
+        list.addAll(defaultExerciseCatalog)
+        val customArr = JSONArray(prefs.getString("custom_exercises_json", "[]"))
+        for (i in 0 until customArr.length()) {
+            val o = customArr.getJSONObject(i)
+            list.add(
+                ExerciseMeta(
+                    id = o.optString("id", "cust_$i"),
+                    name = o.optString("name", "Custom Exercise"),
+                    muscle = o.optString("muscle", "Chest"),
+                    secondaryMuscles = o.optString("muscle", "Full Body"),
+                    equipment = o.optString("equipment", "Dumbbell"),
+                    animType = o.optInt("animType", 0),
+                    howToSteps = o.optString("steps", "Maintain controlled form and full range of motion."),
+                    isCustom = true
+                )
+            )
+        }
+        return list
     }
 
     private fun renderWorkoutStudioTab() {
@@ -1184,6 +1284,37 @@ class MainActivity : AppCompatActivity() {
         val workoutMins = prefs.getInt("workout_minutes", 0)
         val totalVolumeKg = calculateTotalVolumeKg()
 
+        // 0. LIVE REST COUNTDOWN TIMER BAR (Screenshot 7 00:48 Rest Bar Style)
+        val restCard = createGlassCard("#10192D", "#10B981")
+        restCard.addView(createSectionLabel("⏱️ WEIGHTLIFTING SET REST TIMER (AUTO-STARTS ON SET CHECK)"))
+
+        tvRestTimerStatus = TextView(this).apply {
+            text = if (restTimeLeftSeconds > 0) {
+                String.format(Locale.getDefault(), "🟢 RESTING: %02d:%02d", restTimeLeftSeconds / 60, restTimeLeftSeconds % 60)
+            } else {
+                "⏱️ Rest Timer Ready (Tap 30s / 60s / 90s or check a set)"
+            }
+            setTextColor(Color.parseColor("#4ADE80"))
+            textSize = 20f
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            background = createGlassDrawable("#064E3B", "#10B981", 22f)
+            setPadding(24, 18, 24, 18)
+        }
+        restCard.addView(tvRestTimerStatus)
+
+        val restBtnsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 12, 0, 0)
+        }
+        restBtnsRow.addView(createPillButton("30s Rest") { startRestTimer(30) })
+        restBtnsRow.addView(createPillButton("60s Rest") { startRestTimer(60) })
+        restBtnsRow.addView(createPillButton("90s Rest") { startRestTimer(90) })
+        restBtnsRow.addView(createPillButton("Stop") { stopRestTimer() })
+        restCard.addView(restBtnsRow)
+        workoutContentContainer.addView(restCard)
+
+        // 1. FITNESS TRACKER SMART REPORT + ANATOMICAL MUSCLE BODY MAP
         val reportCard = createGlassCard("#10192D", "#EF4444")
         reportCard.addView(createSectionLabel("FITNESS TRACKER SMART • VOLUME & FOCUS AREA MAP"))
 
@@ -1206,6 +1337,7 @@ class MainActivity : AppCompatActivity() {
         reportCard.addView(bodyMapView)
         workoutContentContainer.addView(reportCard)
 
+        // 2. WORKOUT.COOL SMART FILTER + ADD CUSTOM EXERCISE
         val filterCard = createGlassCard("#10192D", "#2A4365")
         filterCard.addView(createSectionLabel("STEP 1: SELECT EQUIPMENT (WORKOUT.COOL GENERATOR)"))
 
@@ -1241,7 +1373,7 @@ class MainActivity : AppCompatActivity() {
         filterCard.addView(createSectionLabel("STEP 2: SELECT FOCUS AREA / TARGET MUSCLE"))
         val muscleScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
-            setPadding(0, 6, 0, 6)
+            setPadding(0, 6, 0, 14)
         }
         val mRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val muscles = listOf("All", "Chest", "Back", "Arms", "Abs", "Shoulders", "Legs", "Core")
@@ -1267,10 +1399,16 @@ class MainActivity : AppCompatActivity() {
         }
         muscleScroll.addView(mRow)
         filterCard.addView(muscleScroll)
+
+        filterCard.addView(createActionButton("+ Create Custom Exercise & Set (Add to Catalog)", "#0284C7", "#38BDF8") {
+            showAddCustomExerciseDialog()
+        })
         workoutContentContainer.addView(filterCard)
 
+        // 3. EXERCISE CARDS
         val setsStateObj = JSONObject(prefs.getString("workout_sets_json", "{}"))
-        val filteredExercises = exerciseCatalog.filter { ex ->
+        val allExercises = getFullExerciseCatalog()
+        val filteredExercises = allExercises.filter { ex ->
             (selectedMuscleFilter == "All" || ex.muscle.equals(selectedMuscleFilter, true) || ex.secondaryMuscles.contains(selectedMuscleFilter, true)) &&
             (selectedEquipmentFilter == "All" || ex.equipment.equals(selectedEquipmentFilter, true))
         }
@@ -1303,7 +1441,7 @@ class MainActivity : AppCompatActivity() {
             val tvExTitle = TextView(this).apply {
                 text = ex.name
                 setTextColor(Color.WHITE)
-                textSize = 16.5f
+                textSize = 16f
                 setTypeface(null, Typeface.BOLD)
             }
             val tvExSub = TextView(this).apply {
@@ -1338,6 +1476,11 @@ class MainActivity : AppCompatActivity() {
             topRow.addView(animThumb)
             topRow.addView(metaCol)
             topRow.addView(btnVideoGuide)
+            if (ex.isCustom) {
+                topRow.addView(createMiniTagButton("🗑️", "#450A0A", "#EF4444", "#FCA5A5") {
+                    deleteCustomExercise(ex.id)
+                })
+            }
             exCard.addView(topRow)
 
             for (s in 0 until exSetsArr.length()) {
@@ -1372,6 +1515,7 @@ class MainActivity : AppCompatActivity() {
                         prefs.edit().putString("workout_sets_json", setsStateObj.toString()).apply()
                         if (nextState) {
                             addXp(15, "Set ${s + 1} Done! (+${kg * reps} kg vol & +15 XP)")
+                            startRestTimer(60)
                         } else {
                             addXp(-15, "Set ${s + 1} Unchecked (-15 XP)")
                         }
@@ -1501,6 +1645,86 @@ class MainActivity : AppCompatActivity() {
             }
         }
         workoutContentContainer.addView(historyCard)
+    }
+
+    private fun startRestTimer(seconds: Int) {
+        restCountDownTimer?.cancel()
+        restTimeLeftSeconds = seconds
+        restCountDownTimer = object : CountDownTimer(seconds * 1000L, 1000L) {
+            override fun onTick(millisUntilFinished: Long) {
+                restTimeLeftSeconds = (millisUntilFinished / 1000L).toInt()
+                tvRestTimerStatus?.text = String.format(
+                    Locale.getDefault(),
+                    "🟢 RESTING: %02d:%02d",
+                    restTimeLeftSeconds / 60,
+                    restTimeLeftSeconds % 60
+                )
+            }
+
+            override fun onFinish() {
+                restTimeLeftSeconds = 0
+                tvRestTimerStatus?.text = "⚡ REST COMPLETE! Start Next Set!"
+                playCompletionSound()
+            }
+        }.start()
+    }
+
+    private fun stopRestTimer() {
+        restCountDownTimer?.cancel()
+        restTimeLeftSeconds = 0
+        tvRestTimerStatus?.text = "⏱️ Rest Timer Stopped"
+    }
+
+    private fun showAddCustomExerciseDialog() {
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(50, 32, 50, 16) }
+        val inputName = EditText(this).apply { hint = "Exercise Name (e.g., Incline Dumbbell Press)" }
+        val inputMuscle = EditText(this).apply {
+            hint = "Target Muscle (Chest / Back / Arms / Abs / Shoulders / Legs)"
+            setText(if (selectedMuscleFilter == "All") "Chest" else selectedMuscleFilter)
+        }
+        val inputEquip = EditText(this).apply {
+            hint = "Equipment (Body Weight / Dumbbell / Barbell / Cable Machine)"
+            setText(if (selectedEquipmentFilter == "All") "Dumbbell" else selectedEquipmentFilter)
+        }
+        val inputSteps = EditText(this).apply { hint = "How To Do / Form Cues" }
+
+        layout.addView(inputName); layout.addView(inputMuscle); layout.addView(inputEquip); layout.addView(inputSteps)
+
+        AlertDialog.Builder(this)
+            .setTitle("➕ Add Custom Exercise")
+            .setView(layout)
+            .setPositiveButton("Add Exercise") { _, _ ->
+                val name = inputName.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    val arr = JSONArray(prefs.getString("custom_exercises_json", "[]"))
+                    val id = "custom_${System.currentTimeMillis()}"
+                    arr.put(
+                        JSONObject()
+                            .put("id", id)
+                            .put("name", name)
+                            .put("muscle", inputMuscle.text.toString().trim().ifEmpty { "Chest" })
+                            .put("equipment", inputEquip.text.toString().trim().ifEmpty { "Dumbbell" })
+                            .put("steps", inputSteps.text.toString().trim().ifEmpty { "Focus on controlled eccentric and full range of motion." })
+                            .put("animType", 0)
+                    )
+                    prefs.edit().putString("custom_exercises_json", arr.toString()).apply()
+                    renderWorkoutStudioTab()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun deleteCustomExercise(exId: String) {
+        val arr = JSONArray(prefs.getString("custom_exercises_json", "[]"))
+        for (i in 0 until arr.length()) {
+            if (arr.getJSONObject(i).optString("id") == exId) {
+                arr.remove(i)
+                break
+            }
+        }
+        prefs.edit().putString("custom_exercises_json", arr.toString()).apply()
+        renderWorkoutStudioTab()
     }
 
     private fun createDefaultSetsForExercise(): JSONArray {
@@ -1654,7 +1878,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ====================================================
-    // TAB 5: SMART APP & YOUTUBE SHORTS SHIELD (STRICT LOCKED)
+    // TAB 5: SHIELD + INSTALLED APP SELECTOR + BACKUP/RESTORE
     // ====================================================
     private fun buildShieldTab() {
         val shieldCard = createGlassCard("#10192D", "#2A4365")
@@ -1682,7 +1906,7 @@ class MainActivity : AppCompatActivity() {
         val shieldRules = listOf(
             Triple("block_shorts", "Block YouTube Shorts (Allow CA/B.Com Study Lectures)", true),
             Triple("block_insta", "Block Instagram & Reels Completely", true),
-            Triple("block_social_games", "Block Social Apps (FB, Snapchat, X, TikTok)", true),
+            Triple("block_social_games", "Block Social Apps (FB, Snapchat, X, TikTok, Reddit)", true),
             Triple("block_full_yt", "Nuclear Mode: Block Entire YouTube App", false)
         )
         shieldRules.forEach { (key, label, defaultVal) ->
@@ -1720,6 +1944,183 @@ class MainActivity : AppCompatActivity() {
         shieldCard.addView(btnOpenAcc)
         shieldCard.addView(btnOpenAppInfo)
         tabShieldContainer.addView(shieldCard)
+
+        // Custom Installed App & Game Blocker Card
+        customBlockedAppsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        tabShieldContainer.addView(customBlockedAppsContainer)
+
+        // Backup & Restore Progress Card
+        val backupCard = createGlassCard("#10192D", "#10B981")
+        backupCard.addView(createSectionLabel("💾 CLOUD / CLIPBOARD DATA BACKUP & RESTORE"))
+        backupCard.addView(TextView(this).apply {
+            text = "Save or restore your Hunter XP, CA/B.Com syllabus, habits, and workout logs across APK updates."
+            setTextColor(Color.parseColor("#CBD5E1"))
+            textSize = 12f
+            setPadding(0, 0, 0, 14)
+        })
+        val backupRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        backupRow.addView(createActionButton("📋 Copy Backup Code", "#064E3B", "#10B981") { exportBackupToClipboard() })
+        backupRow.addView(createActionButton("📥 Restore Backup", "#1E293B", "#38BDF8") { showRestoreBackupDialog() })
+        backupCard.addView(backupRow)
+        tabShieldContainer.addView(backupCard)
+    }
+
+    private fun renderCustomBlockedAppsCard() {
+        customBlockedAppsContainer.removeAllViews()
+        val card = createGlassCard("#10192D", "#EF4444")
+        card.addView(createSectionLabel("📲 CUSTOM BLOCKED APPS & GAMES ON YOUR iQOO Z9"))
+
+        val btnSelectApps = createActionButton("📲 Select Installed Apps / Games to Block", "#991B1B", "#F87171") {
+            showInstalledAppsPickerDialog()
+        }
+        (btnSelectApps.layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, 0, 16)
+        card.addView(btnSelectApps)
+
+        val customArr = JSONArray(prefs.getString("custom_blocked_apps_json", "[]"))
+        if (customArr.length() == 0) {
+            card.addView(TextView(this).apply {
+                text = "No custom apps added yet. Tap above to block games (BGMI, Free Fire, etc.) or distracting apps."
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 12f
+            })
+        } else {
+            for (i in 0 until customArr.length()) {
+                val obj = customArr.getJSONObject(i)
+                val appName = obj.optString("name", "App")
+                val appPkg = obj.optString("pkg", "")
+
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    background = createGlassDrawable("#090F1D", "#1E293B", 18f)
+                    setPadding(22, 14, 18, 14)
+                    val p = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    p.setMargins(0, 0, 0, 10)
+                    layoutParams = p
+                }
+
+                row.addView(TextView(this).apply {
+                    text = "🚫 $appName\n($appPkg)"
+                    setTextColor(Color.parseColor("#FCA5A5"))
+                    textSize = 12f
+                    setTypeface(null, Typeface.BOLD)
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+
+                row.addView(createMiniTagButton("✕ Unblock", "#450A0A", "#EF4444", "#FCA5A5") {
+                    if (isTimerRunning && cbStrictLock.isChecked) {
+                        Toast.makeText(this@MainActivity, "🔒 Strict Lock Active! Cannot unblock apps while timer runs.", Toast.LENGTH_SHORT).show()
+                        return@createMiniTagButton
+                    }
+                    customArr.remove(i)
+                    prefs.edit().putString("custom_blocked_apps_json", customArr.toString()).apply()
+                    renderCustomBlockedAppsCard()
+                })
+                card.addView(row)
+            }
+        }
+        customBlockedAppsContainer.addView(card)
+    }
+
+    private fun showInstalledAppsPickerDialog() {
+        try {
+            val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
+            val resolveInfos = packageManager.queryIntentActivities(mainIntent, 0)
+            val appItems = mutableListOf<Pair<String, String>>()
+            val seenPkgs = mutableSetOf<String>()
+
+            for (ri in resolveInfos) {
+                val pkg = ri.activityInfo.packageName
+                if (pkg == packageName || pkg == "com.android.settings" || pkg.contains("launcher") || seenPkgs.contains(pkg)) continue
+                seenPkgs.add(pkg)
+                val label = ri.loadLabel(packageManager).toString()
+                appItems.add(label to pkg)
+            }
+            appItems.sortBy { it.first.lowercase(Locale.getDefault()) }
+
+            val customArr = JSONArray(prefs.getString("custom_blocked_apps_json", "[]"))
+            val currentlyBlocked = mutableSetOf<String>()
+            for (i in 0 until customArr.length()) {
+                currentlyBlocked.add(customArr.getJSONObject(i).optString("pkg"))
+            }
+
+            val namesArray = appItems.map { "${it.first} (${it.second})" }.toTypedArray()
+            val checkedArray = BooleanArray(appItems.size) { idx ->
+                currentlyBlocked.contains(appItems[idx].second)
+            }
+
+            AlertDialog.Builder(this)
+                .setTitle("📲 Select Apps & Games to Block")
+                .setMultiChoiceItems(namesArray, checkedArray) { _, which, isChecked ->
+                    if (!isChecked && isTimerRunning && cbStrictLock.isChecked) {
+                        checkedArray[which] = true
+                        Toast.makeText(this, "🔒 Strict Mode Active! Cannot unblock while timer runs.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        checkedArray[which] = isChecked
+                    }
+                }
+                .setPositiveButton("Save Blocklist") { _, _ ->
+                    val newArr = JSONArray()
+                    for (idx in appItems.indices) {
+                        if (checkedArray[idx]) {
+                            newArr.put(JSONObject().put("name", appItems[idx].first).put("pkg", appItems[idx].second))
+                        }
+                    }
+                    prefs.edit().putString("custom_blocked_apps_json", newArr.toString()).apply()
+                    Toast.makeText(this, "🛡️ Blocked ${newArr.length()} custom apps!", Toast.LENGTH_SHORT).show()
+                    renderCustomBlockedAppsCard()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not load app list", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun exportBackupToClipboard() {
+        val backupObj = JSONObject()
+        for ((k, v) in prefs.all) {
+            backupObj.put(k, v)
+        }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("FocusForgeBackup", backupObj.toString()))
+        Toast.makeText(this, "📋 Backup Code copied to Clipboard! Save it in Notes.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun showRestoreBackupDialog() {
+        val input = EditText(this).apply {
+            hint = "Paste your FocusForge Backup JSON code here"
+            setPadding(50, 36, 50, 36)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("📥 Restore Backup Code")
+            .setView(input)
+            .setPositiveButton("Restore Now") { _, _ ->
+                try {
+                    val raw = input.text.toString().trim()
+                    val obj = JSONObject(raw)
+                    val editor = prefs.edit()
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        when (val v = obj.get(k)) {
+                            is Boolean -> editor.putBoolean(k, v)
+                            is Int -> editor.putInt(k, v)
+                            is Long -> editor.putLong(k, v)
+                            is String -> editor.putString(k, v)
+                        }
+                    }
+                    editor.apply()
+                    refreshAllUI()
+                    Toast.makeText(this, "🎉 Progress & Syllabus Restored Successfully!", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Invalid Backup Code", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // ====================================================
@@ -1750,6 +2151,15 @@ class MainActivity : AppCompatActivity() {
                 )))
             }
             prefs.edit().putString("syllabus_json", defaultSubjects.toString()).apply()
+        }
+
+        if (!prefs.contains("QuickVault_json")) {
+            val defaultVault = JSONArray().apply {
+                put(JSONObject().put("tag", "Contract Act • Sec 10").put("body", "All agreements are contracts if made by free consent of parties competent to contract, for a lawful consideration and with a lawful object."))
+                put(JSONObject().put("tag", "Accounting • AS 2").put("body", "Inventories should be valued at lower of Cost and Net Realisable Value (NRV)."))
+                put(JSONObject().put("tag", "Quant • Compound Interest").put("body", "A = P(1 + r/n)^(nt)  |  Effective Rate E = (1 + i)^n - 1"))
+            }
+            prefs.edit().putString("QuickVault_json", defaultVault.toString()).apply()
         }
 
         if (!prefs.contains("habits_matrix_json")) {
@@ -1820,6 +2230,7 @@ class MainActivity : AppCompatActivity() {
         renderSyllabusCards()
         renderConsistencyTab()
         renderWorkoutStudioTab()
+        renderCustomBlockedAppsCard()
     }
 
     private fun addXp(amount: Int, toastMsg: String) {
@@ -2297,5 +2708,6 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         countDownTimer?.cancel()
+        restCountDownTimer?.cancel()
     }
 }
