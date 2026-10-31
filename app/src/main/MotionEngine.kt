@@ -34,6 +34,7 @@ object MotionLibrary {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
     private val missing = HashSet<String>()
+    private val present = HashSet<String>()
     private val inFlight = HashSet<String>()
     private val main = Handler(Looper.getMainLooper())
     private val workerHandler: Handler by lazy {
@@ -58,12 +59,12 @@ object MotionLibrary {
 
     fun has(context: Context, assetId: String): Boolean {
         if (assetId.isEmpty()) return false
-        if (cache.get("poster:$assetId") != null) return true
+        if (present.contains(assetId)) return true
         if (missing.contains(assetId)) return false
         return try {
             val list = context.assets.list("$ROOT/$assetId")
             val ok = list != null && list.any { it.startsWith("f") && it.endsWith(".webp") }
-            if (!ok) missing.add(assetId)
+            if (ok) present.add(assetId) else missing.add(assetId)
             ok
         } catch (e: Exception) {
             missing.add(assetId)
@@ -142,11 +143,17 @@ object MotionLibrary {
     }
 
     /** Body map + mask + highlight overlays (static, kept for the session). */
+    private val bodyInFlight = HashSet<String>()
+
     fun bodyAsset(context: Context, path: String, onReady: (Bitmap) -> Unit) {
         cache.get("bm:$path")?.let { onReady(it); return }
+        synchronized(bodyInFlight) {
+            if (!bodyInFlight.add(path)) return
+        }
         val app = context.applicationContext
         workerHandler.post {
             val bmp = decode(app, path)
+            synchronized(bodyInFlight) { bodyInFlight.remove(path) }
             main.post {
                 if (bmp != null) {
                     cache.put("bm:$path", bmp)
