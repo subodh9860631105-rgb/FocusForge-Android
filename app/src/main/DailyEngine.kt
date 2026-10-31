@@ -580,7 +580,7 @@ class GoalBarView(
         val r = h / 2f
         rect.set(0f, 0f, width.toFloat(), h)
         canvas.drawRoundRect(rect, r, r, trackPaint)
-        val filled = width.toFloat() * progress
+        val filled = width.toFloat() * progress.coerceIn(0f, 1f)
         if (filled > 1f) {
             rect.set(0f, 0f, filled, h)
             canvas.drawRoundRect(rect, r, r, fillPaint)
