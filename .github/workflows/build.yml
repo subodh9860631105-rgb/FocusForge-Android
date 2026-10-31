@@ -2,7 +2,8 @@ name: Build FocusForge Pro APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "arena/**", "feature/**" ]
+  pull_request:
   workflow_dispatch:
 
 jobs:
