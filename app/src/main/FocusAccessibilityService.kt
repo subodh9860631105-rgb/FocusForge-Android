@@ -9,6 +9,7 @@ import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
+import org.json.JSONArray
 
 class FocusAccessibilityService : AccessibilityService() {
 
@@ -42,7 +43,7 @@ class FocusAccessibilityService : AccessibilityService() {
         if (event == null) return
         val pkg = event.packageName?.toString() ?: return
 
-        if (pkg == "com.focusforge.pro" || pkg == "com.android.systemui" || pkg.contains("launcher")) {
+        if (pkg == "com.focusforge.pro" || pkg == "com.android.systemui" || pkg.contains("launcher") || pkg.contains("settings")) {
             return
         }
 
@@ -52,7 +53,7 @@ class FocusAccessibilityService : AccessibilityService() {
     private fun recheckActiveWindow() {
         val rootNode = rootInActiveWindow ?: return
         val pkg = rootNode.packageName?.toString() ?: return
-        if (pkg == "com.focusforge.pro" || pkg == "com.android.systemui" || pkg.contains("launcher")) {
+        if (pkg == "com.focusforge.pro" || pkg == "com.android.systemui" || pkg.contains("launcher") || pkg.contains("settings")) {
             return
         }
         inspectAndEnforce(pkg, rootNode)
@@ -67,6 +68,19 @@ class FocusAccessibilityService : AccessibilityService() {
         val blockFullYoutube = prefs.getBoolean("block_full_yt", false)
         val blockInsta = prefs.getBoolean("block_insta", true)
         val blockSocialGames = prefs.getBoolean("block_social_games", true)
+
+        // 0. Check User's Custom Blocked Apps & Games List
+        val customBlockedJson = prefs.getString("custom_blocked_apps_json", "[]") ?: "[]"
+        val customArr = JSONArray(customBlockedJson)
+        for (i in 0 until customArr.length()) {
+            val item = customArr.getJSONObject(i)
+            val blockedPkg = item.optString("pkg", "")
+            val blockedName = item.optString("name", "App")
+            if (blockedPkg.isNotEmpty() && pkg.equals(blockedPkg, ignoreCase = true)) {
+                enforceBlock(prefs, "$blockedName is locked by FocusForge Shield!", forceHome = true)
+                return
+            }
+        }
 
         // 1. Nuclear Mode: Full YouTube Lock
         if (pkg.contains("youtube") && blockFullYoutube) {
@@ -135,7 +149,6 @@ class FocusAccessibilityService : AccessibilityService() {
             return true
         }
 
-        // Detect if the bottom navigation "Shorts" tab is actively selected
         val desc = node.contentDescription?.toString() ?: ""
         if (node.isSelected && (desc.equals("Shorts", ignoreCase = true) || desc.startsWith("Shorts", ignoreCase = true))) {
             return true
@@ -152,11 +165,9 @@ class FocusAccessibilityService : AccessibilityService() {
     private fun enforceBlock(prefs: SharedPreferences, message: String, forceHome: Boolean) {
         val now = System.currentTimeMillis()
 
-        // 60ms micro-debounce so rapid spam clicks are blocked immediately
         if (now - lastActionTime < 60L) return
         lastActionTime = now
 
-        // Track rapid spam-clicking within a 2.5s window
         if (now - rapidSpamWindowStart < 2500L) {
             rapidSpamCount++
         } else {
@@ -172,12 +183,10 @@ class FocusAccessibilityService : AccessibilityService() {
             performGlobalAction(GLOBAL_ACTION_BACK)
         }
 
-        // Schedule follow-up checks at 150ms and 350ms to catch mid-animation Shorts
         mainHandler.removeCallbacks(verifyRunnable)
         mainHandler.postDelayed(verifyRunnable, 150L)
         mainHandler.postDelayed(verifyRunnable, 350L)
 
-        // Throttle XP and Toast notifications to once every 3 seconds
         if (now - lastRewardTime > 3000L) {
             lastRewardTime = now
             val blockedCount = prefs.getInt("distractions_blocked", 0) + 1
