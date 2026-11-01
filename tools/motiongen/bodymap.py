@@ -114,13 +114,13 @@ def bake(view):
 
     sk = skeleton(pose)
 
-    # shaded 3D render from the raymarcher
+    # --- shaded 3D render from the raymarcher ---
     import mannequin3 as M3
     img, alpha = M3.render(pose, size=SIZE, ss=1)
     arr = np.concatenate([img, alpha[..., None]], axis=2)
     body = PILImage.fromarray((np.clip(arr, 0, 1) * 255).astype(np.uint8), "RGBA")
 
-    # region mask in the same space
+    # --- region mask in the same space ---
     mask = PILImage.new("RGB", (SIZE * SS, SIZE * SS), (0, 0, 0))
     md = ImageDraw.Draw(mask)
     for name, poly in build_regions(sk, view):

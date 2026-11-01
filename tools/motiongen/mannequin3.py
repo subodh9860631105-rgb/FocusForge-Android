@@ -93,9 +93,9 @@ SUIT = Mat(base=(0.26, 0.33, 0.47), shadow=(0.07, 0.10, 0.17),
 SHOE = Mat(base=(0.13, 0.16, 0.24), shadow=(0.02, 0.03, 0.06),
            highlight=(0.34, 0.40, 0.54), spec=0.45, shine=44.0,
            rim=(0.28, 0.55, 0.90), rim_gain=0.60)
-HAIR = Mat(base=(0.10, 0.13, 0.20), shadow=(0.01, 0.02, 0.04),
-           highlight=(0.30, 0.36, 0.48), spec=0.55, shine=52.0,
-           rim=(0.34, 0.60, 0.92), rim_gain=0.80)
+HAIR = Mat(base=(0.20, 0.23, 0.30), shadow=(0.05, 0.06, 0.10),
+           highlight=(0.46, 0.52, 0.62), spec=0.50, shine=46.0,
+           rim=(0.40, 0.66, 0.96), rim_gain=0.90)
 STEEL = Mat(base=(0.52, 0.62, 0.75), shadow=(0.05, 0.09, 0.16),
             highlight=(0.95, 0.99, 1.00), spec=1.0, shine=80.0,
             rim=(0.55, 0.85, 1.0), rim_gain=1.0)
@@ -519,7 +519,7 @@ def _shade(n, mat, ao, glow):
     lam = np.clip(n @ KEY, 0.0, 1.0)
     fil = np.clip(n @ FILL, 0.0, 1.0)
     wrap = np.clip((n @ KEY + mat.wrap) / (1.0 + mat.wrap), 0.0, 1.0)
-    t = np.clip(0.16 + wrap * 0.72 + fil * 0.18, 0.0, 1.0)
+    t = np.clip(0.21 + wrap * 0.70 + fil * 0.20, 0.0, 1.0)
 
     col = mat.shadow + (mat.base - mat.shadow) * t[:, None]
     hi = np.clip((t - 0.70) / 0.42, 0.0, 1.0)[:, None]
