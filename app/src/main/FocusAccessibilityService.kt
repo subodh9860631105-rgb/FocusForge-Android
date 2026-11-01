@@ -61,8 +61,10 @@ class FocusAccessibilityService : AccessibilityService() {
 
     private fun inspectAndEnforce(pkg: String, rootNode: AccessibilityNodeInfo?) {
         val prefs = getSharedPreferences("FocusForgePrefs", Context.MODE_PRIVATE)
-        val isBlockerActive = prefs.getBoolean("blocker_enabled", false)
-        if (!isBlockerActive) return
+        // Master switch + focus-hours schedule + snooze window
+        if (!ShieldGuard.isGuarding(prefs)) return
+        // Apps the user explicitly whitelisted are never touched
+        if (ShieldGuard.isWhitelisted(prefs, pkg)) return
 
         val blockShortsOnly = prefs.getBoolean("block_shorts", true)
         val blockFullYoutube = prefs.getBoolean("block_full_yt", false)
@@ -195,6 +197,7 @@ class FocusAccessibilityService : AccessibilityService() {
                 .putInt("distractions_blocked", blockedCount)
                 .putInt("hunter_xp", currentXp)
                 .apply()
+            DailyLog.bump(prefs, DailyLog.FIELD_BLOCKS, 1)
 
             val displayMsg = if (rapidSpamCount >= 3 && !forceHome) {
                 "Spam-click detected! Exiting to Home Screen."

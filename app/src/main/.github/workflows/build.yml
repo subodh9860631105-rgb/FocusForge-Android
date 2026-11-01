@@ -2,7 +2,8 @@ name: Build FocusForge Pro APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "arena/**", "feature/**" ]
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -21,6 +22,15 @@ jobs:
       - name: Organize Files & Generate Android Configs
         run: |
           mkdir -p app/src/main/java/com/focusforge/pro
+
+          # Copy every Kotlin source in the repo into the Gradle source set.
+          find . -name "*.kt" \
+            -not -path "./.git/*" \
+            -not -path "*/build/*" \
+            -not -path "./app/src/main/java/*" | while read -r f; do
+              echo "  -> $f"
+              cp "$f" app/src/main/java/com/focusforge/pro/
+            done
 
           f1=$(find . -name "AndroidManifest.xml" | head -n 1)
           if [ -n "$f1" ] && [ "$f1" != "./app/src/main/AndroidManifest.xml" ]; then cp "$f1" app/src/main/AndroidManifest.xml; fi

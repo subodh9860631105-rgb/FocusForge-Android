@@ -2,8 +2,12 @@ name: Build FocusForge Pro APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "arena/**", "feature/**" ]
+  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-apk:
@@ -22,14 +26,17 @@ jobs:
         run: |
           mkdir -p app/src/main/java/com/focusforge/pro
 
-          f1=$(find . -name "AndroidManifest.xml" | head -n 1)
+          # Copy every Kotlin source in the repo into the Gradle source set.
+          find . -name "*.kt" \
+            -not -path "./.git/*" \
+            -not -path "*/build/*" \
+            -not -path "./app/src/main/java/*" | while read -r f; do
+              echo "  -> $f"
+              cp "$f" app/src/main/java/com/focusforge/pro/
+            done
+
+          f1=$(find . -name "AndroidManifest.xml" -not -path "./.git/*" | head -n 1)
           if [ -n "$f1" ] && [ "$f1" != "./app/src/main/AndroidManifest.xml" ]; then cp "$f1" app/src/main/AndroidManifest.xml; fi
-
-          f2=$(find . -name "FocusAccessibilityService.kt" | head -n 1)
-          if [ -n "$f2" ] && [ "$f2" != "./app/src/main/java/com/focusforge/pro/FocusAccessibilityService.kt" ]; then cp "$f2" app/src/main/java/com/focusforge/pro/FocusAccessibilityService.kt; fi
-
-          f3=$(find . -name "MainActivity.kt" | head -n 1)
-          if [ -n "$f3" ] && [ "$f3" != "./app/src/main/java/com/focusforge/pro/MainActivity.kt" ]; then cp "$f3" app/src/main/java/com/focusforge/pro/MainActivity.kt; fi
 
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
@@ -130,6 +137,18 @@ jobs:
 
       - name: Compile Debug APK
         run: gradle assembleDebug --no-daemon
+
+      - name: Publish APK to dist/ (downloadable from the repo)
+        if: success() && github.event_name == 'push'
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/FocusForge-Pro-debug.apk
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git add -f dist/FocusForge-Pro-debug.apk
+          if git diff --cached --quiet; then echo "no APK change"; exit 0; fi
+          git commit -m "build: publish FocusForge-Pro-debug.apk [skip ci]"
+          git push || true
 
       - name: Upload Ready APK
         uses: actions/upload-artifact@v4
