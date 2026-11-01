@@ -156,11 +156,11 @@ class AuroraBackdropView(context: Context) : View(context) {
         built = true
         val r1 = max(w, h) * wells[0][2]
         shaderA = RadialGradient(w * wells[0][0], h * wells[0][1], r1,
-            intArrayOf(Theme.withAlpha(wells[0][3].toInt(), 74), 0), Shader.TileMode.CLAMP)
+            Theme.withAlpha(wells[0][3].toInt(), 74), 0, Shader.TileMode.CLAMP)
         shaderB = RadialGradient(w * wells[1][0], h * wells[1][1], max(w, h) * wells[1][2],
-            intArrayOf(Theme.withAlpha(wells[1][3].toInt(), 54), 0), Shader.TileMode.CLAMP)
+            Theme.withAlpha(wells[1][3].toInt(), 54), 0, Shader.TileMode.CLAMP)
         shaderC = RadialGradient(w * wells[2][0], h * wells[2][1], max(w, h) * wells[2][2],
-            intArrayOf(Theme.withAlpha(wells[2][3].toInt(), 58), 0), Shader.TileMode.CLAMP)
+            Theme.withAlpha(wells[2][3].toInt(), 58), 0, Shader.TileMode.CLAMP)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -173,7 +173,7 @@ class AuroraBackdropView(context: Context) : View(context) {
         build(width, height)
         canvas.drawColor(Color.parseColor(Theme.BG_DEEP))
         val vert = LinearGradient(0f, 0f, 0f, height.toFloat(),
-            intArrayOf(Color.parseColor("#070C16"), Color.parseColor(Theme.BG_DEEP)), Shader.TileMode.CLAMP)
+            Color.parseColor("#070C16"), Color.parseColor(Theme.BG_DEEP), Shader.TileMode.CLAMP)
         paint.shader = vert
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
 
@@ -239,7 +239,7 @@ class RingView(context: Context, private var progress: Float = 0f, private val a
         val sweep = 360f * progress
         if (sweep > 0.5f) {
             arc.shader = LinearGradient(l, t, l + size, t + size,
-                intArrayOf(Theme.color(accentHex), Theme.lighten(accentHex, 0.45f)),
+                Theme.color(accentHex), Theme.lighten(accentHex, 0.45f),
                 Shader.TileMode.CLAMP)
             canvas.drawArc(rect, -90f, sweep, false, glow)
             canvas.drawArc(rect, -90f, sweep, false, arc)
