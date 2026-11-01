@@ -521,7 +521,9 @@ class MainActivity : AppCompatActivity() {
         ringCard.addView(tvFocusMetricSummary)
         tabFocusContainer.addView(ringCard)
 
-        val timerCard = createGlassCard("#10192D", "#2A4365")
+        val timerCard = createGlassCard("#10192D", "#2A4365").apply {
+            background = createAccentSurface(Theme.ACCENT, 34f)
+        }
         timerCard.addView(createSectionLabel("CUSTOMIZABLE STUDY CLOCK (HOURS & MINUTES)"))
 
         val chipScroll = HorizontalScrollView(this).apply {
@@ -534,11 +536,22 @@ class MainActivity : AppCompatActivity() {
         tvTimerDisplay = TextView(this).apply {
             text = formatTime(timeLeftInMillis)
             setTextColor(Color.parseColor("#F8FAFC"))
-            textSize = 54f
+            textSize = 56f
             setTypeface(null, Typeface.BOLD)
+            letterSpacing = 0.02f
             gravity = Gravity.CENTER
             setPadding(0, 14, 0, 4)
             setOnClickListener { showCustomTimerDialog() }
+            // gradient numerals: cyan -> indigo, the app's signature look
+            post {
+                val w = width.coerceAtLeast(1).toFloat()
+                val h = height.coerceAtLeast(1).toFloat()
+                paint.shader = android.graphics.LinearGradient(
+                    0f, 0f, w, h,
+                    Color.parseColor("#EAF2FF"), Color.parseColor("#8FB6FF"),
+                    android.graphics.Shader.TileMode.CLAMP
+                )
+            }
         }
 
         tvTimerStatus = TextView(this).apply {

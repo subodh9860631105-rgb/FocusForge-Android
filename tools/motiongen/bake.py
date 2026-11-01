@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import mannequin as M
 import bodymap
-from mannequin import render_loop, Canvas, skeleton
+import mannequin3 as M3
 from exercises import EXERCISES, sample
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -42,11 +42,11 @@ def bake_exercise(ex):
     out = os.path.join(MOTION, ex["id"])
     os.makedirs(out, exist_ok=True)
     poses = [sample(ex, i / FRAMES) for i in range(FRAMES)]
-    ims = render_loop(poses, size=SIZE, ss=2, pad=0.035)
+    ims = M3.render_loop(poses, size=SIZE, pad=0.045)
     for i, im in enumerate(ims):
         im.save(os.path.join(out, "f%02d.webp" % i), quality=88, alpha_quality=95, method=6)
     # poster: biggest, most readable pose of the cycle
-    poster = render_loop([poses[0]], size=POSTER, ss=2, pad=0.035)[0]
+    poster = M3.render_loop([poses[0]], size=POSTER, pad=0.045)[0]
     poster.save(os.path.join(out, "poster.webp"), quality=92, method=6)
     return ex["id"], len(ims)
 

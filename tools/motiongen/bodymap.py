@@ -113,21 +113,12 @@ def bake(view):
                  ankle_n=(0.573, 0.918), ankle_f=(0.427, 0.918))
 
     sk = skeleton(pose)
-    cv = Canvas(SIZE, SS)
-    M.draw_leg(cv, sk, "f", near=False)
-    M.draw_arm(cv, sk, "f", near=False)
-    M.draw_leg(cv, sk, "n", near=True)
-    cv.torso(sk["root"], sk["shoulder"], sk["lean"], sk["side_view"], pose["spread"])
-    cv.torso(sk["root"], sk["shoulder"], sk["lean"], sk["side_view"], pose["spread"],
-             tint=(M.SUIT_LIT, M.SUIT, M.SUIT_DK), t0=-0.26, t1=0.135, rim_gain=0.32)
-    cv.capsule(M.mixp(sk["shoulder"], sk["neck_top"], 0.02), sk["neck_top"],
-               0.034, 0.029, near=True)
-    M.draw_arm(cv, sk, "n", near=True)
-    M.draw_head(cv, sk, pose)
 
-    arr = np.clip(np.concatenate([cv.rgb, cv.a[..., None]], axis=2), 0, 1)
-    body = PILImage.fromarray((arr * 255).astype(np.uint8), "RGBA").resize(
-        (SIZE, SIZE), PILImage.LANCZOS)
+    # shaded 3D render from the raymarcher
+    import mannequin3 as M3
+    img, alpha = M3.render(pose, size=SIZE, ss=1)
+    arr = np.concatenate([img, alpha[..., None]], axis=2)
+    body = PILImage.fromarray((np.clip(arr, 0, 1) * 255).astype(np.uint8), "RGBA")
 
     # region mask in the same space
     mask = PILImage.new("RGB", (SIZE * SS, SIZE * SS), (0, 0, 0))
