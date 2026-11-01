@@ -137,9 +137,9 @@ object Theme {
 class AuroraBackdropView(context: Context) : View(context) {
 
     private val wells = listOf(
-        floatArrayOf(0.18f, 0.06f, 0.62f, 0xFF3B5BFF.toInt()),   // indigo, top left
-        floatArrayOf(0.92f, 0.22f, 0.55f, 0xFF14B8C8.toInt()),   // cyan, top right
-        floatArrayOf(0.55f, 0.92f, 0.70f, 0xFF7C3AED.toInt())    // violet, bottom
+        floatArrayOf(0.18f, 0.06f, 0.62f, 0xFF3B5BFF.toInt().toFloat()),   // indigo, top left
+        floatArrayOf(0.92f, 0.22f, 0.55f, 0xFF14B8C8.toInt().toFloat()),   // cyan, top right
+        floatArrayOf(0.55f, 0.92f, 0.70f, 0xFF7C3AED.toInt().toFloat())    // violet, bottom
     )
     private var shaderA: Shader? = null
     private var shaderB: Shader? = null
