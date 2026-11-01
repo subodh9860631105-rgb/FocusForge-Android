@@ -291,7 +291,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val ring = RingView(this, 0f, Theme.WARN).apply {
-            layoutParams = LinearLayout.LayoutParams(96, 96)
+            layoutParams = android.widget.FrameLayout.LayoutParams(96, 96, Gravity.CENTER)
         }
         levelRingView = ring
         val levelLabel = TextView(this).apply {
@@ -299,7 +299,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 11f
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(96, 96)
+            layoutParams = android.widget.FrameLayout.LayoutParams(96, 96, Gravity.CENTER)
         }
         val levelWrap = android.widget.FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(104, 104)
@@ -3775,7 +3775,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val ring = RingView(this, pct, Theme.ACCENT_2).apply {
-            layoutParams = LinearLayout.LayoutParams(112, 112).apply { setMargins(0, 0, 22, 0) }
+            layoutParams = android.widget.FrameLayout.LayoutParams(112, 112, Gravity.CENTER)
         }
         val pctLabel = TextView(this).apply {
             text = "${(pct * 100).toInt()}%"
@@ -3783,7 +3783,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 15f
             setTypeface(null, Typeface.BOLD)
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(112, 112)
+            layoutParams = android.widget.FrameLayout.LayoutParams(112, 112, Gravity.CENTER)
         }
         val ringWrap = android.widget.FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(112, 112).apply { setMargins(0, 0, 20, 0) }
