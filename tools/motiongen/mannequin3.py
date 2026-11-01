@@ -199,7 +199,7 @@ class Body:
         b = np.array(self.sk[key + "f"], np.float32)
         mid = (a + b) / 2.0
         mid3 = np.array([mid[0], mid[1], 0.0], np.float32)
-        lat_hw = max(float(np.linalg.norm(a - b)) / 2.0, hw)
+        lat_hw = min(max(float(np.linalg.norm(a - b)) / 2.0, hw * 0.42), hw)
         sign = 1.0 if side == "n" else -1.0
         return mid3 + self.L * (sign * lat_hw)
 
@@ -237,6 +237,13 @@ class Body:
         sk = self.sk
         L, U, F = self.L, self.U, self.F
 
+        # when the athlete is horizontal, the torso is seen from an angle where the
+        # lateral bulges dominate; compress them so the silhouette stays readable
+        vert = abs(float(U[1]))
+        lat_scale = 0.80 + 0.20 * min(1.0, vert)
+        relief_scale = 0.30 + 0.70 * min(1.0, vert * 1.4)
+        self._relief = relief_scale
+
         root = self.p3(sk["root"])
         sh = self.p3(sk["shoulder"])
         pelvis = root + U * -0.010
@@ -246,10 +253,10 @@ class Body:
 
         # ---------------- torso surface ----------------
         def torso_sdf(p):
-            d = sd_oellipsoid(p, chest, (L, self.U, F), (0.078, 0.080, 0.058))
-            d = smin(d, sd_oellipsoid(p, ribs, (L, self.U, F), (0.074, 0.066, 0.055)), 0.038)
-            d = smin(d, sd_oellipsoid(p, waist, (L, self.U, F), (0.060, 0.054, 0.048)), 0.038)
-            d = smin(d, sd_oellipsoid(p, pelvis, (L, self.U, F), (0.070, 0.056, 0.052)), 0.038)
+            d = sd_oellipsoid(p, chest, (L, self.U, F), (0.078 * lat_scale, 0.080, 0.058))
+            d = smin(d, sd_oellipsoid(p, ribs, (L, self.U, F), (0.074 * lat_scale, 0.066, 0.055)), 0.038)
+            d = smin(d, sd_oellipsoid(p, waist, (L, self.U, F), (0.060 * lat_scale, 0.054, 0.048)), 0.038)
+            d = smin(d, sd_oellipsoid(p, pelvis, (L, self.U, F), (0.070 * lat_scale, 0.056, 0.052)), 0.038)
             # trapezius wedge into the neck
             d = smin(d, sd_oellipsoid(p, sh + U * -0.010, (L, self.U, F), (0.070, 0.040, 0.040)), 0.032)
             return d
@@ -280,11 +287,12 @@ class Body:
             return m
 
         self.add("skin", torso_sdf)
-        self.add("skin", muscle_sdf)
+        if relief_scale > 0.55:
+            self.add("skin", muscle_sdf)
 
         # ---------------- glutes ----------------
-        hip_n = self.pair("hip_", "n", 0.048)
-        hip_f = self.pair("hip_", "f", 0.048)
+        hip_n = self.pair("hip_", "n", 0.036)
+        hip_f = self.pair("hip_", "f", 0.036)
         glute_c = (hip_n + hip_f) / 2 + U * 0.016 - F * 0.040
 
         def glute_sdf(p):
@@ -317,10 +325,10 @@ class Body:
 
         # ---------------- arms ----------------
         for side in ("n", "f"):
-            s = self.pair("sh_", side, 0.086)
-            e = self.pair("elbow_", side, 0.078)
-            w = self.pair("wrist_", side, 0.074)
-            h = self.pair("hand_", side, 0.072)
+            s = self.pair("sh_", side, 0.070)
+            e = self.pair("elbow_", side, 0.058)
+            w = self.pair("wrist_", side, 0.050)
+            h = self.pair("hand_", side, 0.048)
             self.ellipsoid("skin", s - U * 0.008, _v(0.034, 0.033, 0.034))
             self.capsule("skin", s, e, 0.033, 0.024)
             self.capsule("skin", e, w, 0.024, 0.017)
@@ -338,10 +346,10 @@ class Body:
         hips = {}
         knees = {}
         for side in ("n", "f"):
-            hipj = self.pair("hip_", side, 0.050)
-            knee = self.pair("knee_", side, 0.048)
-            ankle = self.pair("ankle_", side, 0.046)
-            toe = self.pair("toe_", side, 0.044)
+            hipj = self.pair("hip_", side, 0.036)
+            knee = self.pair("knee_", side, 0.030)
+            ankle = self.pair("ankle_", side, 0.028)
+            toe = self.pair("toe_", side, 0.026)
             hips[side] = hipj
             knees[side] = knee
             self.capsule("skin", hipj, knee, 0.052, 0.032)
@@ -359,16 +367,16 @@ class Body:
             self.add("shoe", shoe_field(ankle, toe, fl))
 
             # shorts leg
-            hem = hipj + (knee - hipj) * 0.62
-            self.capsule("suit", hipj + (knee - hipj) * -0.10, hem, 0.056, 0.043)
+            hem = hipj + (knee - hipj) * 0.42
+            self.capsule("suit", hipj + (knee - hipj) * -0.08, hem, 0.052, 0.042)
 
         # ---------------- shorts pelvis ----------------
         def shorts_sdf(p):
-            d = sd_oellipsoid(p, pelvis + U * -0.002 - F * 0.008, (L, self.U, F), (0.078, 0.066, 0.072))
+            d = sd_oellipsoid(p, pelvis + U * -0.002 - F * 0.006, (L, self.U, F), (0.072, 0.060, 0.062))
             for side in ("n", "f"):
                 hj = hips[side]
-                hem = hj + (knees[side] - hj) * 0.62
-                d = smin(d, sd_capsule(p, hj + (knees[side] - hj) * -0.10, hem, 0.057, 0.044), 0.026)
+                hem = hj + (knees[side] - hj) * 0.42
+                d = smin(d, sd_capsule(p, hj + (knees[side] - hj) * -0.08, hem, 0.053, 0.043), 0.026)
             return d
         self.add("suit", shorts_sdf)
 
@@ -387,7 +395,7 @@ class Body:
         best_g = None
         for gi, fns in self._grouped():
             gname = GROUP_ORDER[gi]
-            k = {"skin": 0.030, "suit": 0.024, "hair": 0.010}.get(gname, 0.008)
+            k = {"skin": 0.013, "suit": 0.020, "hair": 0.008}.get(gname, 0.007)
             d = fns[0](p)
             for fn in fns[1:]:
                 d = smin(d, fn(p), k)
