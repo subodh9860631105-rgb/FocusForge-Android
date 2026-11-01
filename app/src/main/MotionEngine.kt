@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
@@ -188,6 +189,10 @@ class MotionFigureView @JvmOverloads constructor(
     private var speed = 1f      // 1x = ~15 fps, reads as a calm, clear demo
     private val frameMs: Long get() = (66L / speed).toLong().coerceAtLeast(20L)
 
+    private var prevBitmap: Bitmap? = null
+    private var blendStart = 0L
+    private val blendMs = 42L
+    private val floorPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bmpPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -195,6 +200,9 @@ class MotionFigureView @JvmOverloads constructor(
     }
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#38BDF8"); style = Paint.Style.FILL
+    }
+    private val fillGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#3DFFD7A8"); style = Paint.Style.FILL
     }
     private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#0B1324"); style = Paint.Style.FILL
@@ -212,6 +220,8 @@ class MotionFigureView @JvmOverloads constructor(
     private val ticker = object : Runnable {
         override fun run() {
             if (!attached || paused || !live) return
+            prevBitmap = bitmap
+            blendStart = System.currentTimeMillis()
             frame = (frame + 1) % MotionLibrary.FRAME_COUNT
             ensureFrame()
             invalidate()
@@ -332,15 +342,44 @@ class MotionFigureView @JvmOverloads constructor(
         val bmp = bitmap
         if (bmp != null) {
             val barSpace = if (showRepBar) h * 0.07f else 0f
-            val availW = w * 0.92f
-            val availH = (h - barSpace) * 0.94f
+            val availW = w * 0.94f
+            val availH = (h - barSpace) * 0.96f
             val scale = minOf(availW / bmp.width, availH / bmp.height)
             val dw = bmp.width * scale
             val dh = bmp.height * scale
             val left = (w - dw) / 2f
             val top = (h - barSpace - dh) / 2f
+
+            // soft elliptical contact shadow under the athlete
+            floorPaint.shader = RadialGradient(
+                w / 2f, top + dh * 0.985f, dw * 0.34f,
+                Color.parseColor("#4D04070C"), Color.TRANSPARENT, Shader.TileMode.CLAMP
+            )
+            canvas.save()
+            canvas.scale(1f, 0.26f, w / 2f, top + dh * 0.985f)
+            canvas.drawCircle(w / 2f, top + dh * 0.985f, dw * 0.34f, floorPaint)
+            canvas.restore()
+
             src.set(0, 0, bmp.width, bmp.height)
-            canvas.drawBitmap(bmp, src, RectF(left, top, left + dw, top + dh), bmpPaint)
+            val dst = RectF(left, top, left + dw, top + dh)
+
+            // short crossfade between consecutive frames keeps the loop fluid
+            val prev = prevBitmap
+            if (prev != null && blendStart > 0L) {
+                val t = ((System.currentTimeMillis() - blendStart).toFloat() / blendMs).coerceIn(0f, 1f)
+                if (t < 1f) {
+                    bmpPaint.alpha = 255
+                    canvas.drawBitmap(prev, src, dst, bmpPaint)
+                    bmpPaint.alpha = (255 * t).toInt().coerceIn(0, 255)
+                } else {
+                    prevBitmap = null
+                    bmpPaint.alpha = 255
+                }
+            } else {
+                bmpPaint.alpha = 255
+            }
+            canvas.drawBitmap(bmp, src, dst, bmpPaint)
+            bmpPaint.alpha = 255
         }
 
         if (showRepBar) {
@@ -349,8 +388,12 @@ class MotionFigureView @JvmOverloads constructor(
             val pad = w * 0.10f
             canvas.drawRoundRect(pad, barY, w - pad, barY + barH, barH / 2f, barH / 2f, trackPaint)
             val progress = frame.toFloat() / MotionLibrary.FRAME_COUNT
-            canvas.drawRoundRect(pad, barY, pad + (w - 2 * pad) * progress,
-                barY + barH, barH / 2f, barH / 2f, fillPaint)
+            val tip = pad + (w - 2 * pad) * progress
+            fillPaint.shader = LinearGradient(pad, 0f, w - pad, 0f,
+                Color.parseColor("#22D3EE"), Color.parseColor("#5B8CFF"), Shader.TileMode.CLAMP)
+            canvas.drawRoundRect(pad, barY, tip, barY + barH, barH / 2f, barH / 2f, fillPaint)
+            // glowing head of the progress bar
+            canvas.drawCircle(tip, barY + barH / 2f, barH * 1.9f, fillGlowPaint)
         }
 
         if (paused && showBackdrop) {
