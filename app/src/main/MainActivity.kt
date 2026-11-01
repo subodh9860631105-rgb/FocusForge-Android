@@ -2686,14 +2686,86 @@ class MainActivity : AppCompatActivity() {
             showAddCustomExerciseDialog()
         }
         searchCard.addView(btnAddCustomEx)
+
+        // quick filters: muscle group + equipment
+        searchCard.addView(TextView(this).apply {
+            text = "MUSCLE"
+            setTextColor(Color.parseColor(Theme.TEXT_MUTE))
+            textSize = 9.5f
+            setTypeface(null, Typeface.BOLD)
+            letterSpacing = 0.16f
+            setPadding(0, 12, 0, 8)
+        })
+        val muscleScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        val muscleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("All", "Chest", "Back", "Shoulders", "Arms", "Legs", "Abs").forEach { m ->
+            val sel = selectedMuscleFilter == m
+            muscleRow.addView(TextView(this).apply {
+                text = m
+                setTextColor(if (sel) Color.WHITE else Color.parseColor(Theme.TEXT_DIM))
+                textSize = 11.5f
+                setTypeface(null, Typeface.BOLD)
+                background = Theme.pill(if (sel) Theme.ACCENT else Theme.HAIRLINE, 20f)
+                setPadding(24, 12, 24, 12)
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.setMargins(0, 0, 10, 0)
+                layoutParams = lp
+                setOnClickListener { selectedMuscleFilter = m; renderWorkoutStudioTab() }
+            })
+        }
+        muscleScroll.addView(muscleRow)
+        searchCard.addView(muscleScroll)
+
+        searchCard.addView(TextView(this).apply {
+            text = "EQUIPMENT"
+            setTextColor(Color.parseColor(Theme.TEXT_MUTE))
+            textSize = 9.5f
+            setTypeface(null, Typeface.BOLD)
+            letterSpacing = 0.16f
+            setPadding(0, 14, 0, 8)
+        })
+        val equipScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        val equipRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("All", "Body Weight", "Dumbbell", "Barbell", "Cable Machine", "Smith Machine").forEach { e ->
+            val sel = selectedEquipmentFilter == e
+            equipRow.addView(TextView(this).apply {
+                text = e
+                setTextColor(if (sel) Color.WHITE else Color.parseColor(Theme.TEXT_DIM))
+                textSize = 11.5f
+                setTypeface(null, Typeface.BOLD)
+                background = Theme.pill(if (sel) Theme.VIOLET else Theme.HAIRLINE, 20f)
+                setPadding(24, 12, 24, 12)
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.setMargins(0, 0, 10, 0)
+                layoutParams = lp
+                setOnClickListener { selectedEquipmentFilter = e; renderWorkoutStudioTab() }
+            })
+        }
+        equipScroll.addView(equipRow)
+        searchCard.addView(equipScroll)
         workoutContentContainer.addView(searchCard)
 
         val allExercises = getFullExerciseCatalog().filter { ex ->
-            exerciseSearchQuery.isEmpty() ||
-            ex.name.contains(exerciseSearchQuery, true) ||
-            ex.muscle.contains(exerciseSearchQuery, true) ||
-            ex.equipment.contains(exerciseSearchQuery, true)
+            val textOk = exerciseSearchQuery.isEmpty() ||
+                ex.name.contains(exerciseSearchQuery, true) ||
+                ex.muscle.contains(exerciseSearchQuery, true) ||
+                ex.equipment.contains(exerciseSearchQuery, true)
+            val muscleOk = selectedMuscleFilter == "All" ||
+                ex.muscle.equals(selectedMuscleFilter, true) ||
+                ex.secondaryMuscles.contains(selectedMuscleFilter, true)
+            val equipOk = selectedEquipmentFilter == "All" ||
+                ex.equipment.equals(selectedEquipmentFilter, true)
+            textOk && muscleOk && equipOk
         }
+        workoutContentContainer.addView(TextView(this).apply {
+            text = "${allExercises.size} exercises" +
+                (if (selectedMuscleFilter != "All") " • $selectedMuscleFilter" else "") +
+                (if (selectedEquipmentFilter != "All") " • $selectedEquipmentFilter" else "")
+            setTextColor(Color.parseColor(Theme.TEXT_MUTE))
+            textSize = 11f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(6, 0, 0, 10)
+        })
 
         allExercises.forEach { ex ->
             val isPinned = expandedExerciseIds.contains(ex.id)
@@ -3040,6 +3112,35 @@ class MainActivity : AppCompatActivity() {
         playbackRow.addView(gap)
         playbackRow.addView(btnSlow)
         container.addView(playbackRow)
+
+        // train straight from the guide: log a set / start rest / open the 1RM maths
+        val guideActionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 4, 0, 6)
+        }
+        guideActionRow.addView(createPillButton("✓ Log a set") {
+            val setsObj = JSONObject(prefs.getString("workout_sets_json", "{}"))
+            val arr = setsObj.optJSONArray(ex.id) ?: createDefaultSetsForExercise()
+            var logged = false
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                if (!o.optBoolean("done", false)) {
+                    o.put("done", true)
+                    logged = true
+                    break
+                }
+            }
+            if (!logged) arr.put(JSONObject().put("kg", 20).put("reps", 12).put("done", true))
+            setsObj.put(ex.id, arr)
+            prefs.edit().putString("workout_sets_json", setsObj.toString()).apply()
+            DailyLog.bump(prefs, DailyLog.FIELD_GYM, 0)
+            addXp(15, "Set logged for ${ex.name} (+15 XP)")
+            startRestTimer(60)
+            renderWorkoutStudioTab()
+        })
+        guideActionRow.addView(createPillButton("⏱️ 60s rest") { startRestTimer(60) })
+        guideActionRow.addView(createPillButton("🧮 1RM") { showOneRmCalculator() })
+        container.addView(guideActionRow)
 
         container.addView(TextView(this).apply {
             text = "Tap the animation to pause • looped 3D motion demo"
